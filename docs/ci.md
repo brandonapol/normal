@@ -124,14 +124,19 @@ pinned in the `Makefile`, so the tool versions are reviewable in a diff rather t
 a marketplace tag. For an OS that people will eventually flash onto a phone, a smaller CI supply
 chain is worth a slower job.
 
-**SHA-pinned actions.** Actions are pinned to major tags, which are mutable. Hardening step, when
-you want it:
+**SHA-pinned actions.** Every action is pinned to a full commit SHA with the tag kept in a trailing
+comment, so a retagged or compromised action cannot silently run with our token. Dependabot
+understands SHA pins and opens PRs when a pinned action publishes a release.
+
+To resolve a SHA without the `gh` CLI:
 
 ```bash
-gh api repos/actions/checkout/git/ref/tags/v4 --jq .object.sha
+git ls-remote --tags --refs https://github.com/actions/checkout | awk '$2=="refs/tags/v4"'
 ```
 
-then replace `@v4` with `@<sha>` and keep the tag in a trailing comment.
+The pins hold the majors that were in use when pinning happened, not the newest majors — pinning
+freezes current behaviour, and upgrading is a separate change with its own testing. Dependabot will
+propose the upgrades.
 
 **CodeQL.** Not wired up, because it needs Advanced Security on a private repo and would fail for
 permissions reasons rather than code reasons. `gosec` runs inside golangci-lint and covers the
