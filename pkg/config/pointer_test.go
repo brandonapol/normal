@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
@@ -73,8 +74,8 @@ func TestGetByNumericIndexStillWorks(t *testing.T) {
 
 func TestGetMissingKeyIsNotFound(t *testing.T) {
 	_, err := config.GetAtPath(document(t), at(t, "/spec/apps/entries/com.example.ghost"))
-	pointerErr, ok := err.(*config.PointerError)
-	if !ok || pointerErr.Code != config.ErrNotFound {
+	var pointerErr *config.PointerError
+	if !errors.As(err, &pointerErr) || pointerErr.Code != config.ErrNotFound {
 		t.Fatalf("expected not-found, got %v", err)
 	}
 }
@@ -129,8 +130,8 @@ func TestRemoveKeyedElement(t *testing.T) {
 
 func TestCannotTraverseIntoScalar(t *testing.T) {
 	_, err := config.SetAtPath(document(t), at(t, "/spec/launcher/columns/nope"), 1)
-	pointerErr, ok := err.(*config.PointerError)
-	if !ok || pointerErr.Code != config.ErrNotTraversable {
+	var pointerErr *config.PointerError
+	if !errors.As(err, &pointerErr) || pointerErr.Code != config.ErrNotTraversable {
 		t.Fatalf("expected not-traversable, got %v", err)
 	}
 }

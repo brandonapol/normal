@@ -7,24 +7,24 @@ import (
 )
 
 limits: {
-	minColumns:                   1
-	maxColumns:                   8
-	maxPages:                     8
-	maxItemsPerPage:              24
-	maxDockItems:                 5
-	minPageSize:                  5
-	maxPageSize:                  100
-	maxAutoLoads:                 3
-	maxContinuationDelaySeconds:  60
-	maxDocumentHeightMultiplier:  4
-	maxExemptions:                3
-	maxExemptionDays:             30
-	minExemptionReasonLength:     12
-	maxNotificationRules:         64
-	maxQuietHoursWindows:         8
-	maxSessionBudgets:            32
-	maxDetectors:                 32
-	maxLabelCount:                16
+	minColumns:                  1
+	maxColumns:                  8
+	maxPages:                    8
+	maxItemsPerPage:             24
+	maxDockItems:                5
+	minPageSize:                 5
+	maxPageSize:                 100
+	maxAutoLoads:                3
+	maxContinuationDelaySeconds: 60
+	maxDocumentHeightMultiplier: 4
+	maxExemptions:               3
+	maxExemptionDays:            30
+	minExemptionReasonLength:    12
+	maxNotificationRules:        64
+	maxQuietHoursWindows:        8
+	maxSessionBudgets:           32
+	maxDetectors:                32
+	maxLabelCount:               16
 }
 
 #PackageID:  =~"^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+$"

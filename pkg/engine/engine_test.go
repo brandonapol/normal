@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -444,19 +445,15 @@ func asFailure(t *testing.T, err error) *engine.Failure {
 	if err == nil {
 		t.Fatal("expected a failure")
 	}
-	failure, ok := err.(*engine.Failure)
-	if !ok {
+	var failure *engine.Failure
+	if !errors.As(err, &failure) {
 		t.Fatalf("expected *engine.Failure, got %T: %v", err, err)
 	}
 	return failure
 }
 
 func asPlanError(err error, target **engine.PlanError) bool {
-	planErr, ok := err.(*engine.PlanError)
-	if ok {
-		*target = planErr
-	}
-	return ok
+	return errors.As(err, target)
 }
 
 func hasCode(err *engine.PlanError, code string) bool {

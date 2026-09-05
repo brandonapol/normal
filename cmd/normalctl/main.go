@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"sort"
@@ -16,13 +18,16 @@ import (
 const usage = `normalctl - work with Normal phone configs
 
 usage:
-  normalctl validate <config.json>          validate a config against the schema
+  normalctl validate [--now RFC3339] <config.json>
+                                            validate a config against the schema
   normalctl render <config.json>            print the files a config renders to
   normalctl diff <current.json> <desired.json>
   normalctl plan <current.json> <desired.json>
   normalctl baseline                        print the baseline config
   normalctl schema                          print the CUE schema
 `
+
+var errInvalidConfig = errors.New("configuration is not valid")
 
 func main() {
 	if len(os.Args) < 2 {
@@ -31,7 +36,9 @@ func main() {
 	}
 
 	if err := run(os.Args[1], os.Args[2:]); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		if !errors.Is(err, errInvalidConfig) {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
 		os.Exit(1)
 	}
 }
@@ -58,23 +65,42 @@ func run(command string, args []string) error {
 	return fmt.Errorf("unknown command %q", command)
 }
 
-func load(path string) (config.Config, error) {
+func load(path string) (document any, parsed config.Config, err error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return config.Config{}, err
+		return nil, config.Config{}, err
 	}
-	return config.ParseConfig(raw)
+	document, err = config.ParseDocument(raw)
+	if err != nil {
+		return nil, config.Config{}, err
+	}
+	parsed, err = config.ParseConfig(raw)
+	if err != nil {
+		return nil, config.Config{}, err
+	}
+	return document, parsed, nil
 }
 
 func loadValid(path string) (config.Config, error) {
-	loaded, err := load(path)
+	document, parsed, err := load(path)
 	if err != nil {
 		return config.Config{}, err
 	}
-	if issues := config.ValidateConfig(loaded, time.Now().UTC()); len(issues) > 0 {
+	if issues := config.Validate(document, time.Now().UTC()); len(issues) > 0 {
 		return config.Config{}, fmt.Errorf("%s is not valid:\n%s", path, formatIssues(issues))
 	}
-	return loaded, nil
+	return parsed, nil
+}
+
+func parseNow(value string) (time.Time, error) {
+	if value == "" {
+		return time.Now().UTC(), nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("--now must be an RFC-3339 timestamp: %w", err)
+	}
+	return parsed.UTC(), nil
 }
 
 func formatIssues(issues []config.Issue) string {
@@ -92,21 +118,32 @@ func emit(value any) error {
 }
 
 func validate(args []string) error {
-	if len(args) != 1 {
+	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
+	nowFlag := flags.String("now", "", "evaluate time-dependent rules at this RFC-3339 instant")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 1 {
 		return fmt.Errorf("validate takes one config file")
 	}
-	loaded, err := load(args[0])
+
+	now, err := parseNow(*nowFlag)
 	if err != nil {
 		return err
 	}
-	issues := config.ValidateConfig(loaded, time.Now().UTC())
+	path := flags.Arg(0)
+	document, parsed, err := load(path)
+	if err != nil {
+		return err
+	}
+
+	issues := config.Validate(document, now)
 	if len(issues) == 0 {
-		fmt.Printf("%s is valid (revision %d)\n", args[0], loaded.Metadata.Revision)
+		fmt.Printf("%s is valid (revision %d)\n", path, parsed.Metadata.Revision)
 		return nil
 	}
-	fmt.Printf("%s has %d issue(s):\n%s", args[0], len(issues), formatIssues(issues))
-	os.Exit(1)
-	return nil
+	fmt.Printf("%s has %d issue(s):\n%s", path, len(issues), formatIssues(issues))
+	return errInvalidConfig
 }
 
 func render(args []string) error {
@@ -132,15 +169,15 @@ func render(args []string) error {
 	return nil
 }
 
-func loadPair(args []string, command string) (config.Config, config.Config, error) {
+func loadPair(args []string, command string) (current, desired config.Config, err error) {
 	if len(args) != 2 {
 		return config.Config{}, config.Config{}, fmt.Errorf("%s takes a current and a desired config", command)
 	}
-	current, err := loadValid(args[0])
+	current, err = loadValid(args[0])
 	if err != nil {
 		return config.Config{}, config.Config{}, err
 	}
-	desired, err := loadValid(args[1])
+	desired, err = loadValid(args[1])
 	if err != nil {
 		return config.Config{}, config.Config{}, err
 	}

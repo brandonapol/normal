@@ -1,0 +1,149 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache linters
+        uses: actions/cache@v4
+        with:
+          path: bin/tools
+          key: ${{ runner.os }}-normal-tools-${{ hashFiles('Makefile') }}
+
+      - name: go.mod is tidy
+        run: make tidy-check
+
+      - name: Go formatting
+        run: make fmt-check
+
+      - name: go vet
+        run: make vet
+
+      - name: golangci-lint
+        run: make lint
+
+      - name: CUE schema is formatted and the examples satisfy it
+        run: make schema
+
+  test:
+    name: tests (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        go: [go.mod, stable]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go from go.mod
+        if: matrix.go == 'go.mod'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Go ${{ matrix.go }}
+        if: matrix.go != 'go.mod'
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: Race detector
+        run: make test-race
+
+      - name: Coverage floor
+        run: make cover
+
+      - name: Upload coverage
+        if: matrix.go == 'go.mod'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 14
+
+  invariants:
+    name: product invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: The no-infinite-scroll corpus still behaves as declared
+        run: make invariants
+
+      - name: Generated files match their source
+        run: make drift
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Host build
+        run: make build
+
+      - name: Static linux/arm64 daemon build
+        run: make build-arm64
+
+      - name: Upload arm64 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: normalctl-linux-arm64
+          path: bin/normalctl-linux-arm64
+          retention-days: 14
+
+  ci-passed:
+    name: ci passed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [verify, test, invariants, build]
+    if: always()
+    steps:
+      - name: Fail if any required job did not succeed
+        run: |
+          results='${{ join(needs.*.result, ' ') }}'
+          echo "upstream results: $results"
+          for result in $results; do
+            if [ "$result" != "success" ]; then
+              echo "a required job reported '$result'"
+              exit 1
+            fi
+          done
+          echo "all required jobs succeeded"

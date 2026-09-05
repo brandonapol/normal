@@ -1,0 +1,246 @@
+{
+  "apiVersion": "normal.os/v0",
+  "kind": "PhoneConfig",
+  "metadata": {
+    "name": "normal-baseline",
+    "revision": 0,
+    "description": "Default Normal phone configuration"
+  },
+  "spec": {
+    "launcher": {
+      "layout": "list",
+      "columns": 1,
+      "maxItemsPerPage": 2,
+      "pages": [
+        {
+          "id": "home",
+          "title": "Home",
+          "items": [
+            {
+              "kind": "app",
+              "id": "home-phone",
+              "package": "os.normal.phone"
+            },
+            {
+              "kind": "app",
+              "id": "home-messages",
+              "package": "os.normal.messages"
+            },
+            {
+              "kind": "app",
+              "id": "home-maps",
+              "package": "com.google.android.apps.maps"
+            },
+            {
+              "kind": "app",
+              "id": "home-spotify",
+              "package": "com.spotify.music"
+            }
+          ]
+        }
+      ],
+      "dock": [
+        "os.normal.phone",
+        "os.normal.messages",
+        "os.normal.camera",
+        "os.normal.browser"
+      ],
+      "appDrawer": {
+        "enabled": true,
+        "sort": "alphabetical",
+        "search": true
+      },
+      "gestures": {
+        "long-press-home": {
+          "kind": "toggle",
+          "target": "grayscale"
+        },
+        "swipe-down": {
+          "kind": "open-notifications"
+        },
+        "swipe-up": {
+          "kind": "open-drawer"
+        }
+      }
+    },
+    "apps": {
+      "policy": "allowlist",
+      "entries": [
+        {
+          "package": "os.normal.phone",
+          "label": "Phone",
+          "source": "system",
+          "state": "installed",
+          "network": "allow",
+          "permissions": {
+            "contacts": "allow",
+            "notifications": "allow"
+          }
+        },
+        {
+          "package": "os.normal.messages",
+          "label": "Messages",
+          "source": "system",
+          "state": "installed",
+          "network": "allow",
+          "permissions": {
+            "contacts": "allow",
+            "notifications": "allow"
+          }
+        },
+        {
+          "package": "os.normal.camera",
+          "label": "Camera",
+          "source": "system",
+          "state": "installed",
+          "network": "allow",
+          "permissions": {
+            "camera": "allow",
+            "storage": "allow"
+          }
+        },
+        {
+          "package": "os.normal.browser",
+          "label": "Browser",
+          "source": "system",
+          "state": "installed",
+          "network": "allow",
+          "permissions": {
+            "location": "ask"
+          }
+        },
+        {
+          "package": "com.spotify.music",
+          "label": "Spotify",
+          "source": "play-compat",
+          "state": "installed",
+          "network": "allow",
+          "permissions": {
+            "background-activity": "allow",
+            "notifications": "allow",
+            "storage": "allow"
+          }
+        },
+        {
+          "package": "com.google.android.apps.maps",
+          "label": "Maps",
+          "source": "play-compat",
+          "state": "installed",
+          "network": "allow",
+          "permissions": {
+            "background-activity": "deny",
+            "location": "ask",
+            "notifications": "deny"
+          }
+        }
+      ]
+    },
+    "notifications": {
+      "defaultDisposition": "bundle",
+      "bundling": {
+        "enabled": true,
+        "deliveryWindows": [
+          "09:00",
+          "13:00",
+          "18:00"
+        ]
+      },
+      "quietHours": [
+        {
+          "id": "overnight",
+          "start": "22:00",
+          "end": "07:00",
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat",
+            "sun"
+          ],
+          "breakthrough": [
+            "os.normal.phone"
+          ]
+        }
+      ],
+      "rules": [
+        {
+          "id": "calls-always",
+          "priority": 100,
+          "match": {
+            "package": "os.normal.phone"
+          },
+          "disposition": "allow"
+        },
+        {
+          "id": "messages-allow",
+          "priority": 90,
+          "match": {
+            "package": "os.normal.messages"
+          },
+          "disposition": "allow"
+        },
+        {
+          "id": "no-ongoing-noise",
+          "priority": 10,
+          "match": {
+            "ongoing": true
+          },
+          "disposition": "silence"
+        }
+      ]
+    },
+    "attention": {
+      "infiniteScroll": {
+        "enforcement": "paginate",
+        "pageSize": 20,
+        "maxAutoLoads": 0,
+        "continuation": "tap-with-delay",
+        "continuationDelaySeconds": 3,
+        "detectors": [
+          {
+            "kind": "dom-heuristic",
+            "id": "dom-default",
+            "signals": [
+              "append-on-scroll-mutation",
+              "sentinel-intersection-observer",
+              "unbounded-scroll-height",
+              "absent-pagination-controls"
+            ],
+            "minConfidence": 0.7
+          },
+          {
+            "kind": "accessibility-heuristic",
+            "id": "a11y-default",
+            "signals": [
+              "unbounded-collection-item-count",
+              "recycler-view-refill"
+            ],
+            "minConfidence": 0.75
+          }
+        ],
+        "exemptions": [],
+        "webview": {
+          "injectShim": true,
+          "interceptIntersectionObserver": true,
+          "interceptHistoryScrollRestoration": true,
+          "maxDocumentHeightMultiplier": 2
+        }
+      },
+      "sessionBudgets": [
+        {
+          "id": "browser-daily",
+          "scope": {
+            "kind": "app",
+            "package": "os.normal.browser"
+          },
+          "dailyMinutes": 60,
+          "sessionMinutes": 15,
+          "cooldownMinutes": 30,
+          "onExhausted": "grayscale"
+        }
+      ]
+    }
+  }
+}

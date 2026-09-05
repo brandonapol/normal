@@ -1,0 +1,117 @@
+{
+  "now": "2026-01-01T00:00:00Z",
+  "reject": [
+    {
+      "file": "reject/enforcement-off.json",
+      "code": "invalid-enforcement",
+      "why": "the enforcement enum must not gain an 'off' member"
+    },
+    {
+      "file": "reject/detectors-emptied.json",
+      "code": "empty-detectors",
+      "why": "the detector list must stay typed as non-empty"
+    },
+    {
+      "file": "reject/webview-shim-disabled.json",
+      "code": "policy-violation",
+      "why": "injectShim must stay typed as the literal true"
+    },
+    {
+      "file": "reject/exemption-unjustified.json",
+      "code": "reason-too-short",
+      "why": "an exemption must carry a reason a person can read later"
+    },
+    {
+      "file": "reject/exemption-expired.json",
+      "code": "expired",
+      "why": "an exemption must expire in the future"
+    },
+    {
+      "file": "reject/exemption-too-distant.json",
+      "code": "too-distant",
+      "why": "an exemption must not outlive the 30-day cap"
+    },
+    {
+      "file": "reject/exemption-over-cap.json",
+      "code": "too-many",
+      "why": "no more than three exemptions may be active at once"
+    },
+    {
+      "file": "reject/page-size-over-cap.json",
+      "code": "attention-policy-violation",
+      "why": "page size must stay inside its declared bounds"
+    },
+    {
+      "file": "reject/auto-loads-over-cap.json",
+      "code": "attention-policy-violation",
+      "why": "automatic loads must stay inside their declared bounds"
+    },
+    {
+      "file": "reject/intersection-observer-wrong-type.json",
+      "code": "attention-policy-violation",
+      "why": "shim interception flags must stay booleans"
+    },
+    {
+      "file": "reject/unknown-attention-field.json",
+      "code": "attention-policy-violation",
+      "why": "definitions stay closed, so no field can be smuggled into the attention policy"
+    },
+    {
+      "file": "reject/dangling-dock-reference.json",
+      "code": "dangling-reference",
+      "why": "every referenced package must be an installed app"
+    },
+    {
+      "file": "reject/duplicate-app-entry.json",
+      "code": "duplicate-package",
+      "why": "app entries are keyed, so packages must be unique"
+    },
+    {
+      "file": "reject/empty-notification-match.json",
+      "code": "empty",
+      "why": "a notification rule must constrain at least one field"
+    },
+    {
+      "file": "reject/overfull-launcher-page.json",
+      "code": "too-many",
+      "why": "a page must respect the config's own maxItemsPerPage"
+    },
+    {
+      "file": "reject/budget-session-exceeds-daily.json",
+      "code": "inconsistent",
+      "why": "a session budget cannot exceed its daily budget"
+    },
+    {
+      "file": "reject/unsupported-api-version.json",
+      "code": "unsupported-version",
+      "why": "only the declared apiVersion is accepted"
+    },
+    {
+      "file": "reject/unknown-launcher-field.json",
+      "code": "schema-violation",
+      "why": "definitions stay closed everywhere, not only under attention"
+    }
+  ],
+  "accept": [
+    {
+      "file": "accept/baseline.json",
+      "why": "the shipped default must always validate"
+    },
+    {
+      "file": "accept/bounded-exemption.json",
+      "why": "a justified, expiring, single-app exemption is the strongest permitted escape"
+    },
+    {
+      "file": "accept/stricter-enforcement.json",
+      "why": "tightening policy is always allowed"
+    },
+    {
+      "file": "accept/no-optional-fields.json",
+      "why": "optional fields must stay optional"
+    },
+    {
+      "file": "accept/exemptions-at-cap.json",
+      "why": "exactly the cap is allowed; one more is not"
+    }
+  ]
+}

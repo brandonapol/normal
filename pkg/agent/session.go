@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -92,7 +93,7 @@ func EvaluateConfig(current, candidate config.Config, operations []Operation) (E
 	plan, err := engine.PlanApply(current, desired)
 	if err != nil {
 		var planErr *engine.PlanError
-		if ok := asPlanError(err, &planErr); ok {
+		if errors.As(err, &planErr) {
 			return Evaluation{}, &Rejection{Kind: RejectPlan, PlanIssues: planErr.Issues}
 		}
 		return Evaluation{}, &Rejection{Kind: RejectPlan, Message: err.Error()}
@@ -110,14 +111,6 @@ func EvaluateConfig(current, candidate config.Config, operations []Operation) (E
 		Review:           verdict.Review,
 		RequiresApproval: verdict.RequiresApproval,
 	}, nil
-}
-
-func asPlanError(err error, target **engine.PlanError) bool {
-	planErr, ok := err.(*engine.PlanError)
-	if ok {
-		*target = planErr
-	}
-	return ok
 }
 
 type ProposalStatus string
@@ -378,8 +371,8 @@ func (s *Session) Apply(ctx context.Context, id string) (Outcome, *ApplyRejectio
 	if err != nil {
 		proposal.Status = StatusFailed
 		s.proposals[id] = proposal
-		failure, ok := err.(*engine.Failure)
-		if !ok {
+		var failure *engine.Failure
+		if !errors.As(err, &failure) {
 			return Outcome{}, &ApplyRejection{Kind: RejectApplyFailed, Message: err.Error()}
 		}
 		return Outcome{}, &ApplyRejection{

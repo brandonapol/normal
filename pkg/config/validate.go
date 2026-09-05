@@ -108,7 +108,7 @@ func pointerFromCUE(path []string) string {
 
 var exemptionReason = regexp.MustCompile(`^/spec/attention/infiniteScroll/exemptions/\d+/reason$`)
 
-func classify(pointer, message string) (string, string) {
+func classify(pointer, message string) (code, friendly string) {
 	switch {
 	case pointer == "/spec/attention/infiniteScroll/enforcement":
 		return "invalid-enforcement", "enforcement must be warn, paginate, or block; the schema has no way to switch it off"
@@ -198,6 +198,14 @@ func normalize(document any) (any, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func ParseDocument(data []byte) (any, error) {
+	var document any
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil, err
+	}
+	return document, nil
 }
 
 func ParseConfig(data []byte) (Config, error) {

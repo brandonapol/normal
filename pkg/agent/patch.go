@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -45,10 +46,10 @@ func ApplyPatch(document any, operations []Operation) (any, []PatchIssue) {
 			}}
 		}
 		if mutationErr != nil {
-			var pointerErr *config.PointerError
 			code := "patch-failed"
 			message := mutationErr.Error()
-			if ok := asPointerError(mutationErr, &pointerErr); ok {
+			var pointerErr *config.PointerError
+			if errors.As(mutationErr, &pointerErr) {
 				code = string(pointerErr.Code)
 				message = pointerErr.Message
 			}
@@ -61,14 +62,6 @@ func ApplyPatch(document any, operations []Operation) (any, []PatchIssue) {
 		draft = next
 	}
 	return draft, nil
-}
-
-func asPointerError(err error, target **config.PointerError) bool {
-	pointerErr, ok := err.(*config.PointerError)
-	if ok {
-		*target = pointerErr
-	}
-	return ok
 }
 
 func PatchConfig(current config.Config, operations []Operation, now time.Time) (config.Config, *Rejection) {

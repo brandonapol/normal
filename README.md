@@ -1,5 +1,8 @@
 # normal
 
+[![ci](https://github.com/brandonapol/normal/actions/workflows/ci.yml/badge.svg)](https://github.com/brandonapol/normal/actions/workflows/ci.yml)
+[![security](https://github.com/brandonapol/normal/actions/workflows/security.yml/badge.svg)](https://github.com/brandonapol/normal/actions/workflows/security.yml)
+
 An opinionated phone OS configured by conversation instead of settings menus.
 
 This repository is the **control plane**, not the OS: a declarative config schema, a transactional
@@ -24,8 +27,9 @@ pkg/config/              Go bindings, JSON pointers, validation (CUE + semantic)
 pkg/engine/              diff -> plan -> apply -> rollback, over injected ports
 pkg/agent/               the agent's entire surface: tool defs, policy, session
 cmd/normalctl/           dev CLI: validate, render, diff, plan
+testdata/invariants/     frozen corpus proving the scroll policy cannot be loosened
 examples/                the baseline config, generated from code
-docs/                    architecture, schema, agent contract, scroll blocking, base OS
+docs/                    architecture, schema, agent contract, scroll blocking, base OS, CI
 ```
 
 Dependencies flow one way: `schema <- config <- engine <- agent`. Nothing depends on Android, and
@@ -56,12 +60,21 @@ time, and duplicate-key detection. `docs/architecture.md` has the full split.
 ## Quickstart
 
 ```bash
-go build ./...
-go test ./...                                     # 73 tests, no device required
-go run ./cmd/normalctl baseline > examples/baseline.config.json
+make ci             # everything CI runs, in CI order
+make test           # unit tests, no device required
+make invariants     # prove the scroll policy still cannot be loosened
+make help
+```
+
+```bash
 go run ./cmd/normalctl validate examples/baseline.config.json
 go run ./cmd/normalctl plan current.json desired.json
+go run ./cmd/normalctl baseline > examples/baseline.config.json
 ```
+
+CI runs the same `make` targets you do, so a green `make ci` locally means a green pipeline.
+`docs/ci.md` explains the checks — in particular the frozen fixture corpus that keeps the
+no-infinite-scroll invariants from being quietly loosened.
 
 A change, end to end:
 

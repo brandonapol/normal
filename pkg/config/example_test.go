@@ -18,15 +18,15 @@ func TestExampleMatchesBaseline(t *testing.T) {
 	}
 
 	var onDisk, inCode any
-	if err := json.Unmarshal(raw, &onDisk); err != nil {
-		t.Fatalf("unmarshal example: %v", err)
+	if decodeErr := json.Unmarshal(raw, &onDisk); decodeErr != nil {
+		t.Fatalf("unmarshal example: %v", decodeErr)
 	}
 	encoded, err := json.Marshal(config.Baseline())
 	if err != nil {
 		t.Fatalf("marshal baseline: %v", err)
 	}
-	if err := json.Unmarshal(encoded, &inCode); err != nil {
-		t.Fatalf("unmarshal baseline: %v", err)
+	if decodeErr := json.Unmarshal(encoded, &inCode); decodeErr != nil {
+		t.Fatalf("unmarshal baseline: %v", decodeErr)
 	}
 
 	if !reflect.DeepEqual(onDisk, inCode) {
