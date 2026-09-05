@@ -34,7 +34,9 @@ type Entry struct {
 	Outcome       Outcome   `json:"outcome"`
 	StartedAt     time.Time `json:"startedAt"`
 	FinishedAt    time.Time `json:"finishedAt"`
+	KeyID         string    `json:"keyId,omitempty"`
 	Hash          string    `json:"hash"`
+	Signature     string    `json:"signature,omitempty"`
 }
 
 type Pending struct {
@@ -50,12 +52,29 @@ type Pending struct {
 
 func ComputeHash(entry Entry) string {
 	entry.Hash = ""
+	entry.Signature = ""
 	raw, err := json.Marshal(entry)
 	if err != nil {
 		return ""
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
+}
+
+func LinkAndSign(previous *Entry, entry Entry, signer Signer) (Entry, error) {
+	if signer != nil {
+		entry.KeyID = signer.KeyID()
+	}
+	linked := Link(previous, entry)
+	if signer == nil {
+		return linked, nil
+	}
+	signature, err := signer.Sign([]byte(linked.Hash))
+	if err != nil {
+		return Entry{}, fmt.Errorf("signing entry %d: %w", linked.Sequence, err)
+	}
+	linked.Signature = EncodeSignature(signature)
+	return linked, nil
 }
 
 func Link(previous *Entry, entry Entry) Entry {

@@ -12,7 +12,15 @@ const (
 	ProblemUnfinished     ProblemKind = "unfinished-transaction"
 	ProblemMissingOutcome ProblemKind = "missing-outcome"
 	ProblemConfigGap      ProblemKind = "config-changed-outside-engine"
+	ProblemUnsigned       ProblemKind = "unsigned-entry"
+	ProblemBadSignature   ProblemKind = "invalid-signature"
+	ProblemForeignKey     ProblemKind = "unexpected-signing-key"
+	ProblemConfigDrift    ProblemKind = "config-drift"
 )
+
+type Options struct {
+	PublicKey []byte
+}
 
 type Problem struct {
 	Sequence int         `json:"sequence"`
@@ -42,7 +50,15 @@ func validOutcome(outcome Outcome) bool {
 }
 
 func Verify(entries []Entry, decode DecodeReport, pending *Pending) Report {
+	return VerifyWith(entries, decode, pending, Options{})
+}
+
+func VerifyWith(entries []Entry, decode DecodeReport, pending *Pending, options Options) Report {
 	report := Report{Entries: len(entries), Problems: []Problem{}, Pending: pending}
+	expectedKeyID := ""
+	if len(options.PublicKey) > 0 {
+		expectedKeyID = KeyIDFor(options.PublicKey)
+	}
 
 	if decode.Truncated {
 		report.Incomplete = true
@@ -81,6 +97,34 @@ func Verify(entries []Entry, decode DecodeReport, pending *Pending) Report {
 			})
 			return report
 		}
+		if expectedKeyID != "" {
+			if entry.Signature == "" {
+				report.Problems = append(report.Problems, Problem{
+					Sequence: entry.Sequence,
+					Kind:     ProblemUnsigned,
+					Message:  "entry carries no signature, so it was not written by the engine",
+				})
+				return report
+			}
+			if entry.KeyID != expectedKeyID {
+				report.Problems = append(report.Problems, Problem{
+					Sequence: entry.Sequence,
+					Kind:     ProblemForeignKey,
+					Message: fmt.Sprintf("signed with key %s, expected %s",
+						entry.KeyID, expectedKeyID),
+				})
+				return report
+			}
+			if err := VerifySignature(options.PublicKey, []byte(entry.Hash), entry.Signature); err != nil {
+				report.Problems = append(report.Problems, Problem{
+					Sequence: entry.Sequence,
+					Kind:     ProblemBadSignature,
+					Message:  err.Error(),
+				})
+				return report
+			}
+		}
+
 		if !validOutcome(entry.Outcome) {
 			report.Problems = append(report.Problems, Problem{
 				Sequence: entry.Sequence,

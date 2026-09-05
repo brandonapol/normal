@@ -17,6 +17,7 @@ type Store struct {
 	FS          FileSystem
 	LogPath     string
 	PendingPath string
+	Signer      Signer
 }
 
 func NewStore(fs FileSystem, root string) Store {
@@ -25,6 +26,11 @@ func NewStore(fs FileSystem, root string) Store {
 		LogPath:     root + "/audit.log",
 		PendingPath: root + "/audit.pending",
 	}
+}
+
+func (s Store) WithSigner(signer Signer) Store {
+	s.Signer = signer
+	return s
 }
 
 func (s Store) Load(ctx context.Context) ([]Entry, DecodeReport, *Pending, error) {
@@ -85,7 +91,10 @@ func (s Store) Commit(ctx context.Context, entry Entry) (Entry, error) {
 		return Entry{}, err
 	}
 
-	linked := Link(Head(existing), entry)
+	linked, err := LinkAndSign(Head(existing), entry, s.Signer)
+	if err != nil {
+		return Entry{}, err
+	}
 	line, err := EncodeEntry(linked)
 	if err != nil {
 		return Entry{}, err
@@ -112,6 +121,14 @@ func (s Store) clearPending(ctx context.Context) {
 }
 
 func (s Store) VerifyLog(ctx context.Context) Report {
+	options := Options{}
+	if s.Signer != nil {
+		options.PublicKey = s.Signer.PublicKey()
+	}
+	return s.VerifyLogWith(ctx, options)
+}
+
+func (s Store) VerifyLogWith(ctx context.Context, options Options) Report {
 	entries, decode, pending, loadErr := s.Load(ctx)
 	if loadErr != nil {
 		return Report{
@@ -124,5 +141,5 @@ func (s Store) VerifyLog(ctx context.Context) Report {
 			Incomplete: true,
 		}
 	}
-	return Verify(entries, decode, pending)
+	return VerifyWith(entries, decode, pending, options)
 }

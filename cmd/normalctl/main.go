@@ -23,6 +23,7 @@ usage:
   normalctl render <config.json>            print the files a config renders to
   normalctl diff <current.json> <desired.json>
   normalctl plan <current.json> <desired.json>
+  normalctl verify [dir]                    check the audit chain and config for drift
   normalctl audit verify [dir]              check the audit chain (default /etc/normal)
   normalctl audit log [dir]                 render transaction history
   normalctl baseline                        print the baseline config
@@ -55,6 +56,8 @@ func run(command string, args []string) error {
 		return diff(args)
 	case "plan":
 		return plan(args)
+	case "verify":
+		return verifyCommand(args)
 	case "audit":
 		return auditCommand(args)
 	case "baseline":

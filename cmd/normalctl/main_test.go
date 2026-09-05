@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -308,5 +309,157 @@ func TestAuditRejectsUnknownSubcommand(t *testing.T) {
 	}
 	if _, err := capture(t, "audit"); err == nil {
 		t.Fatal("expected a missing subcommand to error")
+	}
+}
+
+func signedDeviceDir(t *testing.T) (string, *audit.SoftwareSigner) {
+	t.Helper()
+
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i)
+	}
+	signer, err := audit.NewSoftwareSignerFromSeed(seed)
+	if err != nil {
+		t.Fatalf("signer: %v", err)
+	}
+
+	files, err := engine.Render(config.Baseline())
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	ports := engine.NewMemoryPorts(engine.MemoryOptions{Files: files})
+	store := audit.NewStore(ports.FS, "/etc/normal").WithSigner(signer)
+	ports.Audit = store
+
+	session := agent.NewSession(agent.SessionOptions{
+		InitialConfig: config.Baseline(),
+		Ports:         ports.Ports,
+	})
+	proposal, rejection := session.Propose("make the home screen two columns",
+		[]agent.Operation{{Op: "set", Path: "/spec/launcher/columns", Value: 2}})
+	if rejection != nil {
+		t.Fatalf("Propose: %v", rejection)
+	}
+	session.Approve(proposal.ID, "brandon")
+	if _, rej := session.Apply(context.Background(), proposal.ID); rej != nil {
+		t.Fatalf("Apply: %v", rej)
+	}
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "generated"), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for path, contents := range ports.FS.Snapshot() {
+		relative := strings.TrimPrefix(path, "/etc/normal/")
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(relative)), []byte(contents), 0o600); err != nil {
+			t.Fatalf("write %s: %v", relative, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "audit.pub"),
+		[]byte(base64.StdEncoding.EncodeToString(signer.PublicKey())), 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+	return dir, signer
+}
+
+func TestVerifyAcceptsACleanDevice(t *testing.T) {
+	dir, _ := signedDeviceDir(t)
+	output, err := capture(t, "verify", dir)
+	if err != nil {
+		t.Fatalf("a clean device should verify: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "chain intact") {
+		t.Fatalf("unexpected output %q", output)
+	}
+	if strings.Contains(output, "signatures were not checked") {
+		t.Fatal("audit.pub is present, so signatures should have been checked")
+	}
+}
+
+func TestVerifyDetectsAHandEditedConfig(t *testing.T) {
+	dir, _ := signedDeviceDir(t)
+	path := filepath.Join(dir, "launcher.json")
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	edited := strings.Replace(string(raw), `"columns": 2`, `"columns": 6`, 1)
+	if edited == string(raw) {
+		t.Fatal("test setup failed to edit the config")
+	}
+	if err := os.WriteFile(path, []byte(edited), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	output, verifyErr := capture(t, "verify", dir)
+	if !errors.Is(verifyErr, errInvalidConfig) {
+		t.Fatalf("a hand-edited config must fail verification, got %v", verifyErr)
+	}
+	if !strings.Contains(output, "config-drift") {
+		t.Fatalf("the failure should name drift, got %q", output)
+	}
+}
+
+func TestVerifyDetectsATamperedAuditLog(t *testing.T) {
+	dir, _ := signedDeviceDir(t)
+	path := filepath.Join(dir, "audit.log")
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	tampered := strings.Replace(string(raw), `"approvedBy":"brandon"`, `"approvedBy":"nobody"`, 1)
+	if err := os.WriteFile(path, []byte(tampered), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	output, verifyErr := capture(t, "verify", dir)
+	if !errors.Is(verifyErr, errInvalidConfig) {
+		t.Fatalf("a tampered log must fail verification, got %v", verifyErr)
+	}
+	if !strings.Contains(output, "hash-mismatch") {
+		t.Fatalf("expected a hash mismatch, got %q", output)
+	}
+}
+
+func TestVerifySaysWhenSignaturesWereNotChecked(t *testing.T) {
+	dir, _ := signedDeviceDir(t)
+	if err := os.Remove(filepath.Join(dir, "audit.pub")); err != nil {
+		t.Fatalf("remove key: %v", err)
+	}
+
+	output, err := capture(t, "verify", dir)
+	if err != nil {
+		t.Fatalf("verification without a key should still run: %v", err)
+	}
+	if !strings.Contains(output, "signatures were not checked") {
+		t.Fatal("the absence of a key must be stated, not silently ignored")
+	}
+}
+
+func TestVerifyRejectsAForeignKey(t *testing.T) {
+	dir, _ := signedDeviceDir(t)
+
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(200 - i)
+	}
+	other, err := audit.NewSoftwareSignerFromSeed(seed)
+	if err != nil {
+		t.Fatalf("signer: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "audit.pub"),
+		[]byte(base64.StdEncoding.EncodeToString(other.PublicKey())), 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+
+	output, verifyErr := capture(t, "verify", dir)
+	if !errors.Is(verifyErr, errInvalidConfig) {
+		t.Fatalf("a chain signed by another key must not verify, got %v", verifyErr)
+	}
+	if !strings.Contains(output, "unexpected-signing-key") {
+		t.Fatalf("expected the key mismatch to be named, got %q", output)
 	}
 }
