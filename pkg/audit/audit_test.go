@@ -488,3 +488,72 @@ func TestStoreSignsWhatItCommits(t *testing.T) {
 		t.Fatal("a tampered signed log must not verify")
 	}
 }
+
+func TestReplayingAnOlderLogIsDetected(t *testing.T) {
+	signer := testSigner(t)
+	ports := engine.NewMemoryPorts(engine.MemoryOptions{})
+	store := audit.NewStore(ports.FS, "/etc/normal").WithSigner(signer)
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		next := entry("change", i, i+1)
+		next.ConfigBefore = digestFor(i)
+		next.ConfigAfter = digestFor(i + 1)
+		if _, err := store.Commit(ctx, next); err != nil {
+			t.Fatalf("Commit: %v", err)
+		}
+	}
+	if got := store.Ceiling(ctx); got != 3 {
+		t.Fatalf("the ceiling should track the highest revision reached, got %d", got)
+	}
+
+	entries, _, _, err := store.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	older, err := audit.Encode(entries[:1])
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	if err := ports.FS.Write(ctx, store.LogPath, string(older)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	report := store.VerifyLog(ctx)
+	if report.Valid() {
+		t.Fatal("a validly-signed but older log must still be rejected")
+	}
+	if report.Problems[0].Kind != audit.ProblemReplay {
+		t.Fatalf("expected revision-replay, got %s", report.Problems[0].Kind)
+	}
+	if !strings.Contains(report.Problems[0].Message, "replayed") {
+		t.Fatalf("the message should say what happened, got %q", report.Problems[0].Message)
+	}
+}
+
+func TestCeilingNeverFalls(t *testing.T) {
+	ports := engine.NewMemoryPorts(engine.MemoryOptions{})
+	store := audit.NewStore(ports.FS, "/etc/normal")
+	ctx := context.Background()
+
+	high := entry("forward", 0, 5)
+	high.ConfigBefore = digestFor(0)
+	high.ConfigAfter = digestFor(5)
+	if _, err := store.Commit(ctx, high); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	rollback := entry("roll back", 5, 6)
+	rollback.ConfigBefore = digestFor(5)
+	rollback.ConfigAfter = digestFor(0)
+	if _, err := store.Commit(ctx, rollback); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	if got := store.Ceiling(ctx); got != 6 {
+		t.Fatalf("a rollback moves forward, so the ceiling should be 6, got %d", got)
+	}
+	if report := store.VerifyLog(ctx); !report.Valid() {
+		t.Fatalf("a legitimate rollback should verify, got %v", report.Problems)
+	}
+}

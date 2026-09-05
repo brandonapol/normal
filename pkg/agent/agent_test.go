@@ -543,3 +543,124 @@ func TestRollbackProposalsCountAgainstTheQuota(t *testing.T) {
 		t.Fatalf("rollback proposals must respect the same quota, got %+v", result.Error)
 	}
 }
+
+func applyProposal(t *testing.T, session *agent.Session, intent string, ops []any) {
+	t.Helper()
+	result := call(session, "propose_change", map[string]any{"intent": intent, "operations": ops})
+	summary := mustSummary(t, result)
+	if _, rej := session.Approve(summary.ProposalID, "user"); rej != nil {
+		t.Fatalf("Approve: %v", rej)
+	}
+	if applied := call(session, "apply_proposal", map[string]any{"proposalId": summary.ProposalID}); !applied.OK {
+		t.Fatalf("apply %q: %+v", intent, applied.Error)
+	}
+}
+
+func TestRollingBackALauncherChangeNeedsNoExtraConfirmation(t *testing.T) {
+	session := newPermissiveSession(t)
+
+	applyProposal(t, session, "two columns", []any{
+		map[string]any{"op": "set", "path": "/spec/launcher/columns", "value": 2},
+	})
+
+	rollback := mustSummary(t, call(session, "propose_rollback", map[string]any{"revision": 0}))
+	if rollback.RequiresApproval {
+		t.Fatalf("a purely cosmetic rollback should not need approval, review was %+v", rollback.Review)
+	}
+}
+
+func TestRollingBackAPermissionGrantListsTheRegressingFields(t *testing.T) {
+	session := newPermissiveSession(t)
+
+	applyProposal(t, session, "lock down location and network for Maps", []any{
+		map[string]any{"op": "set", "path": "/spec/apps/entries/com.google.android.apps.maps/permissions/location", "value": "deny"},
+		map[string]any{"op": "set", "path": "/spec/apps/entries/com.google.android.apps.maps/network", "value": "wifi-only"},
+	})
+
+	rollback := mustSummary(t, call(session, "propose_rollback", map[string]any{"revision": 0}))
+	if !rollback.RequiresApproval {
+		t.Fatal("rolling back a lockdown re-opens access and must need approval")
+	}
+
+	paths := make([]string, 0, len(rollback.Review))
+	messages := make([]string, 0, len(rollback.Review))
+	for _, issue := range rollback.Review {
+		if issue.Code == "security-regression" {
+			paths = append(paths, issue.Path)
+			messages = append(messages, issue.Message)
+		}
+	}
+	joinedPaths := strings.Join(paths, " ")
+	if !strings.Contains(joinedPaths, "permissions/location") {
+		t.Errorf("the regressing permission should be named, got %v", paths)
+	}
+	if !strings.Contains(joinedPaths, "/network") {
+		t.Errorf("the widened network access should be named, got %v", paths)
+	}
+
+	joinedMessages := strings.Join(messages, " ")
+	if !strings.Contains(joinedMessages, "deny") || !strings.Contains(joinedMessages, "ask") {
+		t.Errorf("the message should say what changes to what, got %v", messages)
+	}
+}
+
+func TestTighteningIsNotARegression(t *testing.T) {
+	session := newPermissiveSession(t)
+
+	summary := mustSummary(t, call(session, "propose_change", map[string]any{
+		"intent": "deny Spotify the microphone",
+		"operations": []any{
+			map[string]any{"op": "set", "path": "/spec/apps/entries/com.spotify.music/permissions/microphone", "value": "deny"},
+		},
+	}))
+
+	for _, issue := range summary.Review {
+		if issue.Code == "security-regression" {
+			t.Fatalf("tightening a permission is not a regression, got %+v", issue)
+		}
+	}
+	if !summary.RequiresApproval {
+		t.Fatal("permission changes are sensitive and still need approval")
+	}
+}
+
+func TestUnblockingAnAppIsARegression(t *testing.T) {
+	session := newPermissiveSession(t)
+
+	applyProposal(t, session, "block Spotify and take it off the home screen", []any{
+		map[string]any{"op": "set", "path": "/spec/apps/entries/com.spotify.music/state", "value": "blocked"},
+		map[string]any{"op": "remove", "path": "/spec/launcher/pages/home/items/home-spotify"},
+	})
+
+	summary := mustSummary(t, call(session, "propose_rollback", map[string]any{"revision": 0}))
+	found := false
+	for _, issue := range summary.Review {
+		if issue.Code == "security-regression" && strings.Contains(issue.Path, "/state") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("un-blocking an app is a regression, got %+v", summary.Review)
+	}
+}
+
+func TestLooseningTheAppPolicyIsARegression(t *testing.T) {
+	before := config.Baseline()
+	after := config.Baseline()
+	after.Spec.Apps.Policy = "denylist"
+
+	issues := agent.SecurityRegressions(before, after)
+	found := false
+	for _, issue := range issues {
+		if issue.Path == "/spec/apps/policy" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("allowlist to denylist is a loosening, got %+v", issues)
+	}
+
+	if len(agent.SecurityRegressions(after, before)) != 0 {
+		t.Fatal("tightening back to an allowlist is not a regression")
+	}
+}

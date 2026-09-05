@@ -196,7 +196,7 @@ func CheckOperations(operations []Operation) []PolicyIssue {
 }
 
 func CheckPolicy(operations []Operation, before, after config.Config) Verdict {
-	issues := append(CheckOperationPaths(operations), weakenings(before, after)...)
+	issues := append(CheckOperationPaths(operations), SecurityRegressions(before, after)...)
 	verdict := Verdict{Denied: make([]PolicyIssue, 0), Review: make([]PolicyIssue, 0)}
 	for _, issue := range issues {
 		if issue.Severity == SeverityDeny {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 )
 
 type FileSystem interface {
@@ -17,6 +19,7 @@ type Store struct {
 	FS          FileSystem
 	LogPath     string
 	PendingPath string
+	CeilingPath string
 	Signer      Signer
 }
 
@@ -25,7 +28,31 @@ func NewStore(fs FileSystem, root string) Store {
 		FS:          fs,
 		LogPath:     root + "/audit.log",
 		PendingPath: root + "/audit.pending",
+		CeilingPath: root + "/audit.ceiling",
 	}
+}
+
+func (s Store) Ceiling(ctx context.Context) int {
+	exists, err := s.FS.Exists(ctx, s.CeilingPath)
+	if err != nil || !exists {
+		return 0
+	}
+	raw, err := s.FS.Read(ctx, s.CeilingPath)
+	if err != nil {
+		return 0
+	}
+	ceiling, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0
+	}
+	return ceiling
+}
+
+func (s Store) raiseCeiling(ctx context.Context, revision int) {
+	if revision <= s.Ceiling(ctx) {
+		return
+	}
+	_ = s.FS.Write(ctx, s.CeilingPath, strconv.Itoa(revision))
 }
 
 func (s Store) WithSigner(signer Signer) Store {
@@ -112,6 +139,7 @@ func (s Store) Commit(ctx context.Context, entry Entry) (Entry, error) {
 	if err := s.FS.Write(ctx, s.LogPath, previous+string(line)); err != nil {
 		return Entry{}, fmt.Errorf("appending audit entry: %w", err)
 	}
+	s.raiseCeiling(ctx, linked.ToRevision)
 	s.clearPending(ctx)
 	return linked, nil
 }
@@ -121,7 +149,7 @@ func (s Store) clearPending(ctx context.Context) {
 }
 
 func (s Store) VerifyLog(ctx context.Context) Report {
-	options := Options{}
+	options := Options{RevisionCeiling: s.Ceiling(ctx)}
 	if s.Signer != nil {
 		options.PublicKey = s.Signer.PublicKey()
 	}

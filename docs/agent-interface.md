@@ -32,9 +32,17 @@ consent to one. A test asserts no tool name contains "approve".
    default to requiring approval for everything; `ApprovalRequiredForEverything: false` narrows that
    to sensitive paths only, and no setting can make an attention change auto-applicable.
 5. **Weakening detection.** The policy layer compares before and after semantically, not
-   syntactically: dropping enforcement strength, raising `maxAutoLoads` or `pageSize`, adding an
-   exemption, stopping IntersectionObserver interception, or raising a daily budget each produce a
-   `weakens-attention-policy` review item with a plain-language explanation of what got weaker.
+   syntactically. Attention changes — dropping enforcement strength, raising `maxAutoLoads` or
+   `pageSize`, adding an exemption, stopping IntersectionObserver interception, raising a daily
+   budget — produce a `weakens-attention-policy` item. App changes that widen access — a permission
+   moving toward `allow`, network moving toward `allow`, an app going from `blocked` to `installed`,
+   or the app policy loosening from allowlist to denylist — produce a `security-regression` item
+   naming the field and what it changes from and to.
+
+   This applies to rollbacks as much as to forward changes, which is the point: rolling back to a
+   revision that granted an app the microphone is a downgrade attack wearing a feature's clothes.
+   A rollback that only touches cosmetics needs no extra confirmation; one that re-opens access
+   lists exactly which fields regress before asking.
 6. **Staleness.** A proposal is re-evaluated against the *current* config at apply time, not the
    config it was written against. If the world moved underneath it, the apply fails with `stale`
    rather than applying a diff computed against a config that no longer exists.

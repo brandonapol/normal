@@ -16,10 +16,12 @@ const (
 	ProblemBadSignature   ProblemKind = "invalid-signature"
 	ProblemForeignKey     ProblemKind = "unexpected-signing-key"
 	ProblemConfigDrift    ProblemKind = "config-drift"
+	ProblemReplay         ProblemKind = "revision-replay"
 )
 
 type Options struct {
-	PublicKey []byte
+	PublicKey       []byte
+	RevisionCeiling int
 }
 
 type Problem struct {
@@ -149,6 +151,17 @@ func VerifyWith(entries []Entry, decode DecodeReport, pending *Pending, options 
 		}
 
 		previousHash = entry.Hash
+	}
+
+	if head := Head(entries); head != nil && options.RevisionCeiling > head.ToRevision {
+		report.Problems = append(report.Problems, Problem{
+			Sequence: head.Sequence,
+			Kind:     ProblemReplay,
+			Message: fmt.Sprintf(
+				"the log ends at revision %d but this device has reached %d; an older log was replayed",
+				head.ToRevision, options.RevisionCeiling),
+		})
+		return report
 	}
 
 	if pending != nil {

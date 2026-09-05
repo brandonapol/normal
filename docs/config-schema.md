@@ -41,6 +41,10 @@ Each entry carries `source` (`system` | `fdroid` | `play-compat` | `sideload`), 
 map (`allow` | `ask` | `deny` per permission), an optional `sandboxProfile`, and an optional
 `attention` override.
 
+A permission absent from the map means **denied**. The map records explicit decisions; there is no
+implicit grant. This matters for regression detection: removing an explicit `deny` is neutral rather
+than a loosening, because the effective decision does not change.
+
 Every package referenced anywhere else in the document — the dock, a launcher item, a gesture, a
 quiet-hours breakthrough, a notification rule, a scroll exemption, a session budget — must exist
 here with `state: installed`. Dangling references are validation errors, so you cannot end up with a

@@ -103,6 +103,23 @@ in a hardware-backed one behind the same interface, which is why this is a port 
 private key lives on a real device — and how it resists an attacker with root — is device work, not
 control-plane work.
 
+## Replay and the revision ceiling
+
+Signing stops a chain being *rewritten*. It does not stop an old, validly-signed chain being put
+back — every entry in it is genuine, just stale. Restoring yesterday's log and config is how an
+attacker regains a permission that was revoked today.
+
+The store keeps a monotonic ceiling: the highest revision this device has ever reached. Verification
+fails when the log ends below it:
+
+```
+entry 0: the log ends at revision 1 but this device has reached 3;
+         an older log was replayed (revision-replay)
+```
+
+Rollback is unaffected, because rolling back moves *forward* — returning to revision 0's content
+produces a new revision above the ceiling rather than rewinding to it. A test pins that distinction.
+
 ## Config drift
 
 Each entry records the digest of the *rendered* config, not just the document, so `normalctl verify`
@@ -123,5 +140,6 @@ quietly and implying more assurance than it delivered.
   port (NRM-301) should make it a genuine append.
 - **Key storage is unbuilt.** See above; the interface is ready, the device side is not.
 - **Nothing rotates the log yet.** It grows without bound.
-- **A whole-log replacement by someone holding the key is undetectable** from the log alone.
-  Defeating that needs the monotonic counter in NRM-123.
+- **The revision ceiling is only as trustworthy as its storage.** It sits beside the log, so an
+  attacker who can roll back the log can roll back the ceiling too. Real anti-replay needs a counter
+  in secure storage, which is device work; the check and its port are ready for it.

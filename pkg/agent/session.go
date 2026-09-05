@@ -310,7 +310,6 @@ func (s *Session) ProposeRollback(revision int) (Proposal, *Rejection) {
 	if rejection != nil {
 		return Proposal{}, rejection
 	}
-	evaluation.RequiresApproval = true
 	return s.record(fmt.Sprintf("roll back to revision %d", revision), nil, evaluation), nil
 }
 
