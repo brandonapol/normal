@@ -25,7 +25,7 @@ func (e *PointerError) Error() string {
 	return fmt.Sprintf("%s at %q: %s", e.Code, e.Pointer, e.Message)
 }
 
-var numeric = regexp.MustCompile(`^\d+$`)
+var numeric = regexp.MustCompile(`^(0|[1-9]\d*)$`)
 
 func unescapeSegment(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "~1", "/"), "~0", "~")
@@ -192,12 +192,17 @@ func applyMutation(container any, segments []string, trail []walked, op mutation
 	here := FormatPointer(append(segmentsOf(trail), segment))
 
 	if array, isArray := container.([]any); isArray {
-		index := resolveIndex(array, patternOf(trail), segment)
+		pattern := patternOf(trail)
+		index := resolveIndex(array, pattern, segment)
 		if index < 0 {
 			if len(rest) > 0 || op.remove {
 				return nil, &PointerError{Code: ErrNotFound, Pointer: here, Message: fmt.Sprintf("no element matching %q", segment)}
 			}
-			return append(copyArray(array), op.value), nil
+			added, addErr := elementToAppend(pattern, segment, here, op.value)
+			if addErr != nil {
+				return nil, addErr
+			}
+			return append(copyArray(array), added), nil
 		}
 		if len(rest) == 0 && op.remove {
 			out := make([]any, 0, len(array)-1)
@@ -239,6 +244,41 @@ func applyMutation(container any, segments []string, trail []walked, op mutation
 	next := copyRecord(record)
 	next[segment] = child
 	return next, nil
+}
+
+func elementToAppend(pattern, segment, pointer string, value any) (any, error) {
+	keyField, keyed := KeyFieldFor(pattern)
+	if !keyed {
+		return nil, &PointerError{
+			Code:    ErrNotFound,
+			Pointer: pointer,
+			Message: fmt.Sprintf("no element at %q; this collection is addressed by position", segment),
+		}
+	}
+	if segment == "" {
+		return nil, &PointerError{
+			Code:    ErrInvalidPointer,
+			Pointer: pointer,
+			Message: "an empty path segment cannot name a collection member",
+		}
+	}
+	record, isRecord := value.(map[string]any)
+	if !isRecord {
+		return nil, &PointerError{
+			Code:    ErrInvalidPointer,
+			Pointer: pointer,
+			Message: fmt.Sprintf("adding to this collection requires an object carrying %q", keyField),
+		}
+	}
+	key, _ := record[keyField].(string)
+	if key != segment {
+		return nil, &PointerError{
+			Code:    ErrInvalidPointer,
+			Pointer: pointer,
+			Message: fmt.Sprintf("path names %q but the value's %s is %q", segment, keyField, key),
+		}
+	}
+	return value, nil
 }
 
 func SetAtPath(root any, segments []string, value any) (any, error) {

@@ -3,6 +3,7 @@ package config_test
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/brandonapol/normal/pkg/config"
@@ -133,5 +134,56 @@ func TestCannotTraverseIntoScalar(t *testing.T) {
 	var pointerErr *config.PointerError
 	if !errors.As(err, &pointerErr) || pointerErr.Code != config.ErrNotTraversable {
 		t.Fatalf("expected not-traversable, got %v", err)
+	}
+}
+
+func TestNumericSegmentsRejectLeadingZeros(t *testing.T) {
+	document := document(t)
+
+	first, err := config.GetAtPath(document, at(t, "/spec/apps/entries/0/package"))
+	if err != nil {
+		t.Fatalf("index 0 should resolve: %v", err)
+	}
+	if first != "os.normal.phone" {
+		t.Fatalf("unexpected first entry %v", first)
+	}
+
+	for _, alias := range []string{"00", "000", "01"} {
+		if _, err := config.GetAtPath(document, at(t, "/spec/apps/entries/"+alias)); err == nil {
+			t.Errorf("%q must not alias to an array index; RFC 6901 forbids leading zeros", alias)
+		}
+	}
+}
+
+func TestSetRefusesEmptySegmentInCollection(t *testing.T) {
+	_, err := config.SetAtPath(document(t), at(t, "/spec/apps/entries/"), map[string]any{})
+	var pointerErr *config.PointerError
+	if !errors.As(err, &pointerErr) || pointerErr.Code != config.ErrInvalidPointer {
+		t.Fatalf("a trailing slash must not silently append; got %v", err)
+	}
+}
+
+func TestSetRefusesKeyMismatch(t *testing.T) {
+	entry := map[string]any{
+		"package":     "org.actual.name",
+		"source":      "fdroid",
+		"state":       "installed",
+		"network":     "allow",
+		"permissions": map[string]any{},
+	}
+	_, err := config.SetAtPath(document(t), at(t, "/spec/apps/entries/org.claimed.name"), entry)
+	var pointerErr *config.PointerError
+	if !errors.As(err, &pointerErr) || pointerErr.Code != config.ErrInvalidPointer {
+		t.Fatalf("the path and the value's key must agree; got %v", err)
+	}
+	if !strings.Contains(pointerErr.Message, "org.actual.name") {
+		t.Fatalf("the error should name the mismatch, got %q", pointerErr.Message)
+	}
+}
+
+func TestSetRefusesNonNumericIndexOnUnkeyedArray(t *testing.T) {
+	_, err := config.SetAtPath(document(t), at(t, "/spec/launcher/dock/somewhere"), "os.normal.phone")
+	if err == nil {
+		t.Fatal("an unkeyed array is addressed by position; a name must not append")
 	}
 }

@@ -4,6 +4,7 @@ TOOLS_DIR := $(BIN_DIR)/tools
 GOLANGCI_LINT_VERSION ?= v2.6.2
 GOVULNCHECK_VERSION ?= v1.1.4
 COVERAGE_THRESHOLD ?= 75
+FUZZTIME ?= 30s
 COVERAGE_FILE := coverage.out
 GOLANGCI_LINT := $(TOOLS_DIR)/golangci-lint
 GOVULNCHECK := $(TOOLS_DIR)/govulncheck
@@ -18,6 +19,8 @@ help:
 	@echo "  make test          unit tests"
 	@echo "  make test-race     unit tests under the race detector"
 	@echo "  make cover         coverage report, gated at $(COVERAGE_THRESHOLD)%"
+	@echo "  make fuzz-smoke    run every fuzz target against its seed corpus"
+	@echo "  make fuzz          fuzz every target for $(FUZZTIME) each"
 	@echo "  make lint          golangci-lint"
 	@echo "  make fmt           format Go and CUE in place"
 	@echo "  make schema        cue fmt check and cue vet of the examples"
@@ -78,6 +81,26 @@ cover:
 		if (total + 0 < want + 0) { printf "coverage %.1f%% is below the %s%% floor\n", total, want; exit 1 } \
 		printf "coverage %.1f%% meets the %s%% floor\n", total, want }'
 
+.PHONY: fuzz-smoke
+fuzz-smoke:
+	$(GO) test ./... -run '^Fuzz' -count=1
+	@echo "fuzz seed corpora clean"
+
+.PHONY: fuzz
+fuzz:
+	@set -e; \
+	found=0; \
+	for file in $$(grep -rl '^func Fuzz' --include='*_test.go' pkg cmd); do \
+		dir="./$$(dirname $$file)"; \
+		for target in $$(grep -o '^func Fuzz[A-Za-z0-9_]*' $$file | sed 's/^func //'); do \
+			found=$$((found + 1)); \
+			echo "==> $$dir $$target ($(FUZZTIME))"; \
+			$(GO) test $$dir -run '^$$$$' -fuzz "^$$target$$$$" -fuzztime $(FUZZTIME); \
+		done; \
+	done; \
+	if [ "$$found" -eq 0 ]; then echo "no fuzz targets found"; exit 1; fi; \
+	echo "fuzzed $$found targets for $(FUZZTIME) each"
+
 .PHONY: schema-fmt-check
 schema-fmt-check:
 	$(GO) tool cue fmt --check ./schema/...
@@ -132,7 +155,7 @@ vuln: $(GOVULNCHECK)
 	$(GOVULNCHECK) ./...
 
 .PHONY: ci
-ci: tidy-check fmt-check schema vet lint test-race cover invariants drift build-arm64
+ci: tidy-check fmt-check schema vet lint test-race cover fuzz-smoke invariants drift build-arm64
 	@echo
 	@echo "all checks passed"
 

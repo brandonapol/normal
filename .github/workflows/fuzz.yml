@@ -1,0 +1,43 @@
+name: fuzz
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: Duration to fuzz each target
+        required: false
+        default: 5m
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: nightly fuzzing
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Fuzz every target
+        run: make fuzz FUZZTIME=${{ github.event.inputs.fuzztime || '5m' }}
+
+      - name: Upload any crashers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashers
+          path: "**/testdata/fuzz/**"
+          retention-days: 30
+          if-no-files-found: ignore

@@ -69,6 +69,47 @@ that is not a broken test: it means v0 compatibility broke, and that should be a
 2. Add it to `manifest.json` with the issue `code` you expect and a `why` in plain language.
 3. `make invariants`.
 
+## Fuzzing
+
+Seven targets across the three packages, run two ways: `make fuzz-smoke` replays every committed
+seed and crasher on each CI run, and a nightly workflow fuzzes each target for five minutes.
+
+| target | property asserted |
+| --- | --- |
+| `FuzzParsePointer` | parse → format → parse round-trips to the same segments |
+| `FuzzSetAtPath` | never mutates its input; a successful set is readable back at the same path |
+| `FuzzRemoveAtPath` | never mutates its input; a successful remove changes the document |
+| `FuzzValidate` | never panics; every issue carries a machine-readable code |
+| `FuzzApplyPatch` | never mutates its input document; issues always explain themselves |
+| `FuzzProposeOperations` | **no accepted proposal can leave the scroll invariants unsatisfied** |
+| `FuzzDiffDocuments` | diff is empty iff the documents are equal; deterministic; paths are parseable |
+
+`FuzzProposeOperations` is the one worth understanding: it throws arbitrary patch operations at the
+agent boundary and asserts that anything which comes back accepted still has enforcement set, the
+shim enabled, detectors present, and an advanced revision. It is the invariant corpus's argument
+made adversarial — the corpus proves known attacks fail, the fuzzer looks for unknown ones.
+
+Crashers land in `<package>/testdata/fuzz/` and are committed, so a bug found once is replayed on
+every run forever.
+
+### Bugs this has already found
+
+Two, both within seconds of the first run:
+
+- **`/spec/apps/entries/000` aliased to index 0.** The numeric check accepted leading zeros, so
+  `0`, `00` and `000` all resolved to the same element. RFC 6901 forbids leading zeros in array
+  indices, and in a keyed collection the aliasing meant a path could silently address a different
+  element than the one it named.
+- **`/spec/apps/entries/` silently appended a junk element.** A trailing slash produces an empty
+  final segment, which matched no key and was therefore treated as a new key to append. Setting a
+  keyed collection member now requires a non-empty segment, and the value's key field must match
+  the path that names it — so a patch cannot write `com.foo` at the path `com.bar`. Appending to an
+  *unkeyed* array by name is now rejected outright rather than silently placed at the end.
+
+A third came out of writing the targets: `ApplyPatch` accepted the empty pointer, which addresses
+the whole document, so a single operation could replace an entire config with `null`. The policy
+layer already refused it, but the patch layer now does too.
+
 ## Coverage
 
 The floor is 75%; the repo currently sits a little above it. The floor is a ratchet against

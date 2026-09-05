@@ -30,6 +30,13 @@ func ApplyPatch(document any, operations []Operation) (any, []PatchIssue) {
 				Path: operation.Path, Code: "invalid-pointer", Message: err.Error(),
 			}}
 		}
+		if len(segments) == 0 {
+			return nil, []PatchIssue{{
+				Path:    operation.Path,
+				Code:    "invalid-pointer",
+				Message: fmt.Sprintf("operation %d targets the document root; a patch changes parts of a config, it does not replace it", index),
+			}}
+		}
 
 		var next any
 		var mutationErr error
