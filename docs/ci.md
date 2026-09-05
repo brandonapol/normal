@@ -17,8 +17,11 @@ make ci     # tidy-check fmt-check schema vet lint test-race cover invariants dr
 | `build` | host build and a static `linux/arm64` daemon binary |
 | `ci passed` | one gate job to require in branch protection |
 
-`security.yml` runs `govulncheck` on pushes, PRs, and weekly on a schedule, so a dependency that
-becomes vulnerable while nobody is touching the repo still surfaces.
+`security.yml` runs `govulncheck` and the licence gate on pushes, PRs, and weekly on a schedule, so
+a dependency that becomes vulnerable — or that arrives under an unacceptable licence — surfaces even
+while nobody is touching the repo. The allowlist and its reasoning are in
+[`docs/security/licence-policy.md`](security/licence-policy.md); `make licences` also runs as part
+of `make ci`.
 
 Set **`ci passed`** as the only required status check. It fails if any upstream job fails, so
 adding a job later does not mean editing branch protection.
@@ -138,9 +141,11 @@ The pins hold the majors that were in use when pinning happened, not the newest 
 freezes current behaviour, and upgrading is a separate change with its own testing. Dependabot will
 propose the upgrades.
 
-**CodeQL.** Not wired up, because it needs Advanced Security on a private repo and would fail for
-permissions reasons rather than code reasons. `gosec` runs inside golangci-lint and covers the
-common Go footguns. Add CodeQL when the repo goes public.
+**CodeQL and `dependency-review-action`.** Neither is wired up: both need Advanced Security on a
+private repo and would fail for permissions reasons rather than code reasons. `gosec` runs inside
+golangci-lint and covers the common Go footguns, `govulncheck` covers advisories with reachability
+analysis, and `make licences` covers the licence half of dependency review. Add both when the repo
+goes public.
 
 ## Linter policy
 

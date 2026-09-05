@@ -3,11 +3,14 @@ BIN_DIR := bin
 TOOLS_DIR := $(BIN_DIR)/tools
 GOLANGCI_LINT_VERSION ?= v2.6.2
 GOVULNCHECK_VERSION ?= v1.1.4
+GO_LICENSES_VERSION ?= v2.0.0-alpha.1
+ALLOWED_LICENCES ?= Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC
 COVERAGE_THRESHOLD ?= 75
 FUZZTIME ?= 30s
 COVERAGE_FILE := coverage.out
 GOLANGCI_LINT := $(TOOLS_DIR)/golangci-lint
 GOVULNCHECK := $(TOOLS_DIR)/govulncheck
+GO_LICENSES := $(TOOLS_DIR)/go-licenses
 
 .DEFAULT_GOAL := help
 
@@ -29,6 +32,7 @@ help:
 	@echo "  make build         host binary into $(BIN_DIR)"
 	@echo "  make build-arm64   static linux/arm64 daemon binary"
 	@echo "  make vuln          govulncheck"
+	@echo "  make licences      fail on a dependency outside the licence allowlist"
 	@echo "  make clean"
 
 $(TOOLS_DIR):
@@ -40,8 +44,11 @@ $(GOLANGCI_LINT): | $(TOOLS_DIR)
 $(GOVULNCHECK): | $(TOOLS_DIR)
 	GOBIN=$(CURDIR)/$(TOOLS_DIR) $(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 
+$(GO_LICENSES): | $(TOOLS_DIR)
+	GOBIN=$(CURDIR)/$(TOOLS_DIR) $(GO) install github.com/google/go-licenses/v2@$(GO_LICENSES_VERSION)
+
 .PHONY: tools
-tools: $(GOLANGCI_LINT) $(GOVULNCHECK)
+tools: $(GOLANGCI_LINT) $(GOVULNCHECK) $(GO_LICENSES)
 
 .PHONY: fmt
 fmt:
@@ -154,8 +161,19 @@ build-arm64:
 vuln: $(GOVULNCHECK)
 	$(GOVULNCHECK) ./...
 
+.PHONY: licences
+licences: $(GO_LICENSES)
+	$(GO_LICENSES) check ./... \
+		--allowed_licenses=$(ALLOWED_LICENCES) \
+		--ignore github.com/brandonapol/normal
+	@echo "every dependency is under an allowed licence"
+
+.PHONY: licence-report
+licence-report: $(GO_LICENSES)
+	@$(GO_LICENSES) report ./... --ignore github.com/brandonapol/normal 2>/dev/null
+
 .PHONY: ci
-ci: tidy-check fmt-check schema vet lint test-race cover fuzz-smoke invariants drift build-arm64
+ci: tidy-check fmt-check schema vet lint test-race cover fuzz-smoke invariants drift licences build-arm64
 	@echo
 	@echo "all checks passed"
 

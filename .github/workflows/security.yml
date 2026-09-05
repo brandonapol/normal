@@ -36,3 +36,6 @@ jobs:
 
       - name: Known vulnerabilities in dependencies
         run: make vuln
+
+      - name: Dependency licences
+        run: make licences
