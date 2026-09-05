@@ -38,9 +38,15 @@ consent to one. A test asserts no tool name contains "approve".
 6. **Staleness.** A proposal is re-evaluated against the *current* config at apply time, not the
    config it was written against. If the world moved underneath it, the apply fails with `stale`
    rather than applying a diff computed against a config that no longer exists.
-7. **Bounded blast radius.** At most 64 operations per proposal. Every tool returns a `ToolResult`
+7. **Bounded blast radius.** At most 64 operations per proposal, and per-session quotas on
+   proposals created and applies attempted, both declared in the schema's `limits` block. The apply
+   quota is deliberately tighter than the proposal quota — thinking is cheap, changing the device is
+   not. Exceeding either returns an ordinary `ToolResult` error. Every tool returns a `ToolResult`
    value; `Dispatch` never panics and never returns a bare Go error, including for unknown tool
    names.
+8. **Bounded validation.** Document size, nesting depth, and node count are capped before the schema
+   evaluator runs, and a detector's regex is length-capped before it is compiled, so a hostile
+   proposal cannot spend unbounded time or memory. See `docs/config-schema.md`.
 
 ## What the agent sees
 

@@ -31,6 +31,9 @@ limits: {
 	maxDocumentNodes:    20000
 	maxPatternLength:    256
 	validationTimeoutMs: 5000
+
+	maxProposalsPerSession: 256
+	maxAppliesPerSession:   64
 }
 
 #PackageID:  =~"^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+$"

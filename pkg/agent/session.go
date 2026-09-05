@@ -19,6 +19,7 @@ const (
 	RejectValidation      RejectionKind = "validation"
 	RejectPlan            RejectionKind = "plan"
 	RejectUnknownRevision RejectionKind = "unknown-revision"
+	RejectQuotaExceeded   RejectionKind = "quota-exceeded"
 )
 
 type Rejection struct {
@@ -149,6 +150,7 @@ const (
 	RejectApprovalNeeded  ApplyRejectionKind = "approval-required"
 	RejectStale           ApplyRejectionKind = "stale"
 	RejectApplyFailed     ApplyRejectionKind = "apply-failed"
+	RejectApplyQuota      ApplyRejectionKind = "quota-exceeded"
 )
 
 type ApplyRejection struct {
@@ -176,6 +178,8 @@ type Session struct {
 	ports         engine.Ports
 	current       config.Config
 	counter       int
+	applyAttempts int
+	limits        config.Limits
 	alwaysApprove bool
 	proposals     map[string]Proposal
 	order         []string
@@ -187,9 +191,14 @@ func NewSession(options SessionOptions) *Session {
 	if options.ApprovalRequiredForEverything != nil {
 		alwaysApprove = *options.ApprovalRequiredForEverything
 	}
+	limits, err := config.SchemaLimits()
+	if err != nil {
+		limits = config.Limits{}
+	}
 	return &Session{
 		ports:         options.Ports,
 		current:       options.InitialConfig,
+		limits:        limits,
 		alwaysApprove: alwaysApprove,
 		proposals:     make(map[string]Proposal),
 		history: []Revision{{
@@ -251,9 +260,24 @@ func (s *Session) record(intent string, operations []Operation, evaluation Evalu
 	return proposal
 }
 
+func (s *Session) quotaExceeded() *Rejection {
+	if s.limits.MaxProposalsPerSession > 0 && s.counter >= s.limits.MaxProposalsPerSession {
+		return &Rejection{
+			Kind: RejectQuotaExceeded,
+			Message: fmt.Sprintf(
+				"this session has already created %d proposals, which is its limit; start a new session",
+				s.limits.MaxProposalsPerSession),
+		}
+	}
+	return nil
+}
+
 func (s *Session) Propose(intent string, operations []Operation) (Proposal, *Rejection) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if quota := s.quotaExceeded(); quota != nil {
+		return Proposal{}, quota
+	}
 	evaluation, rejection := EvaluateOperations(s.current, operations, s.ports.Clock.Now())
 	if rejection != nil {
 		return Proposal{}, rejection
@@ -264,6 +288,9 @@ func (s *Session) Propose(intent string, operations []Operation) (Proposal, *Rej
 func (s *Session) ProposeRollback(revision int) (Proposal, *Rejection) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if quota := s.quotaExceeded(); quota != nil {
+		return Proposal{}, quota
+	}
 
 	var target *Revision
 	for i := range s.history {
@@ -349,6 +376,15 @@ func (s *Session) Apply(ctx context.Context, id string) (Outcome, *ApplyRejectio
 			Message: fmt.Sprintf("proposal %q changes policy the user must confirm before it is applied", id),
 		}
 	}
+	if s.limits.MaxAppliesPerSession > 0 && s.applyAttempts >= s.limits.MaxAppliesPerSession {
+		return Outcome{}, &ApplyRejection{
+			Kind: RejectApplyQuota,
+			Message: fmt.Sprintf(
+				"this session has already attempted %d applies, which is its limit; start a new session",
+				s.limits.MaxAppliesPerSession),
+		}
+	}
+	s.applyAttempts++
 
 	var (
 		fresh     Evaluation

@@ -50,6 +50,8 @@ type Limits struct {
 	MaxDocumentNodes            int `json:"maxDocumentNodes"`
 	MaxPatternLength            int `json:"maxPatternLength"`
 	ValidationTimeoutMs         int `json:"validationTimeoutMs"`
+	MaxProposalsPerSession      int `json:"maxProposalsPerSession"`
+	MaxAppliesPerSession        int `json:"maxAppliesPerSession"`
 }
 
 type compiled struct {

@@ -478,3 +478,68 @@ func TestRollbackToUnknownRevisionIsRejected(t *testing.T) {
 		t.Fatalf("unexpected error %+v", result.Error)
 	}
 }
+
+func TestProposalQuotaIsEnforced(t *testing.T) {
+	session, _ := newSession(t)
+	limits := config.MustLimits()
+
+	for i := 0; i < limits.MaxProposalsPerSession; i++ {
+		if result := setColumns(session, 2); !result.OK {
+			t.Fatalf("proposal %d should have been accepted: %s", i, result.Error.Message)
+		}
+	}
+
+	result := setColumns(session, 2)
+	toolErr := mustError(t, result)
+	if toolErr.Code != "proposal-rejected" {
+		t.Fatalf("expected a rejection, got %+v", toolErr)
+	}
+	if !strings.Contains(toolErr.Message, "limit") {
+		t.Fatalf("the rejection should explain the quota, got %q", toolErr.Message)
+	}
+}
+
+func TestQuotaRejectionIsAnOrdinaryToolResult(t *testing.T) {
+	session, _ := newSession(t)
+	limits := config.MustLimits()
+
+	for i := 0; i < limits.MaxProposalsPerSession+5; i++ {
+		result := setColumns(session, 2)
+		if result.OK {
+			continue
+		}
+		if result.Error == nil || result.Error.Message == "" {
+			t.Fatal("a quota rejection must still be a well-formed tool result")
+		}
+	}
+}
+
+func TestApplyQuotaIsIndependentOfProposalQuota(t *testing.T) {
+	session, _ := newSession(t)
+	limits := config.MustLimits()
+
+	summary := mustSummary(t, setColumns(session, 2))
+	session.Approve(summary.ProposalID, "user")
+	if applied := call(session, "apply_proposal", map[string]any{"proposalId": summary.ProposalID}); !applied.OK {
+		t.Fatalf("first apply should succeed: %+v", applied.Error)
+	}
+
+	if limits.MaxAppliesPerSession >= limits.MaxProposalsPerSession {
+		t.Fatalf("the apply quota (%d) should be tighter than the proposal quota (%d)",
+			limits.MaxAppliesPerSession, limits.MaxProposalsPerSession)
+	}
+}
+
+func TestRollbackProposalsCountAgainstTheQuota(t *testing.T) {
+	session, _ := newSession(t)
+	limits := config.MustLimits()
+
+	for i := 0; i < limits.MaxProposalsPerSession; i++ {
+		setColumns(session, 2)
+	}
+
+	result := call(session, "propose_rollback", map[string]any{"revision": 0})
+	if mustError(t, result).Code != "proposal-rejected" {
+		t.Fatalf("rollback proposals must respect the same quota, got %+v", result.Error)
+	}
+}
