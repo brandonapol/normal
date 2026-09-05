@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/brandonapol/normal/pkg/audit"
 )
 
 type IOErrorCode string
@@ -62,11 +64,17 @@ type Logger interface {
 	Log(event LogEvent)
 }
 
+type AuditSink interface {
+	Begin(ctx context.Context, pending audit.Pending) error
+	Commit(ctx context.Context, entry audit.Entry) (audit.Entry, error)
+}
+
 type Ports struct {
 	FS       FileSystem
 	Services ServiceHost
 	Clock    Clock
 	Logger   Logger
+	Audit    AuditSink
 }
 
 func (p Ports) log(transactionID, kind, detail string) {

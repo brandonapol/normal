@@ -403,7 +403,11 @@ func (s *Session) Apply(ctx context.Context, id string) (Outcome, *ApplyRejectio
 		}
 	}
 
-	report, err := engine.ApplyPlan(ctx, fresh.Plan, s.ports)
+	plan := fresh.Plan
+	plan.Intent = proposal.Intent
+	plan.ApprovedBy = proposal.ApprovedBy
+
+	report, err := engine.ApplyPlan(ctx, plan, s.ports)
 	if err != nil {
 		proposal.Status = StatusFailed
 		s.proposals[id] = proposal

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brandonapol/normal/pkg/audit"
 	"github.com/brandonapol/normal/pkg/config"
 	"github.com/brandonapol/normal/pkg/engine"
 )
@@ -463,4 +464,138 @@ func hasCode(err *engine.PlanError, code string) bool {
 		}
 	}
 	return false
+}
+
+func auditPorts(t *testing.T, faults ...engine.Fault) (engine.MemoryPorts, audit.Store) {
+	t.Helper()
+	ports := engine.NewMemoryPorts(engine.MemoryOptions{Files: baselineFiles(t), Faults: faults})
+	store := audit.NewStore(ports.FS, "/etc/normal")
+	ports.Audit = store
+	return ports, store
+}
+
+func TestApplyRecordsExactlyOneAuditEntry(t *testing.T) {
+	ports, store := auditPorts(t)
+	plan := planFor(t, withColumns(3))
+	plan.Intent = "two columns please"
+	plan.ApprovedBy = "user"
+
+	if _, err := engine.ApplyPlan(context.Background(), plan, ports.Ports); err != nil {
+		t.Fatalf("ApplyPlan: %v", err)
+	}
+
+	report := store.VerifyLog(context.Background())
+	if report.Entries != 1 {
+		t.Fatalf("expected exactly one entry, got %d", report.Entries)
+	}
+	if !report.Valid() || report.Incomplete {
+		t.Fatalf("the log should be intact and complete, got %+v", report)
+	}
+
+	entries, _, _, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	recorded := entries[0]
+	if recorded.Intent != "two columns please" || recorded.ApprovedBy != "user" {
+		t.Fatalf("the entry lost its intent or approver: %+v", recorded)
+	}
+	if recorded.Outcome != audit.OutcomeApplied {
+		t.Fatalf("expected applied, got %s", recorded.Outcome)
+	}
+	if recorded.ConfigBefore == recorded.ConfigAfter {
+		t.Fatal("a change should move the config digest")
+	}
+}
+
+func TestRolledBackApplyIsRecordedAsSuch(t *testing.T) {
+	ports, store := auditPorts(t, engine.Fault{
+		Kind:   engine.FaultWrite,
+		Target: engine.FileLauncher,
+		Error:  &engine.IOError{Code: engine.ErrIOFailure, Target: engine.FileLauncher, Message: "disk full"},
+		Times:  1,
+	})
+
+	if _, err := engine.ApplyPlan(context.Background(), planFor(t, withColumns(5)), ports.Ports); err == nil {
+		t.Fatal("expected the apply to fail")
+	}
+
+	entries, _, pending, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("a rolled-back transaction is still worth one entry, got %d", len(entries))
+	}
+	if entries[0].Outcome != audit.OutcomeRolledBack {
+		t.Fatalf("expected rolled-back, got %s", entries[0].Outcome)
+	}
+	if entries[0].ConfigBefore != entries[0].ConfigAfter {
+		t.Fatal("a rolled-back transaction left the config where it started, and should say so")
+	}
+	if pending != nil {
+		t.Fatal("a completed rollback should clear the pending marker")
+	}
+}
+
+func TestSuccessiveAppliesExtendTheChain(t *testing.T) {
+	ports, store := auditPorts(t)
+
+	afterFirst := withColumns(3)
+	first := planFor(t, afterFirst)
+	if _, err := engine.ApplyPlan(context.Background(), first, ports.Ports); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+
+	afterSecond := afterFirst
+	afterSecond.Spec.Attention.InfiniteScroll.PageSize = 40
+	afterSecond = engine.WithNextRevision(afterFirst, afterSecond)
+
+	second, planErr := engine.PlanApply(afterFirst, afterSecond)
+	if planErr != nil {
+		t.Fatalf("planning the second change: %v", planErr)
+	}
+	if _, err := engine.ApplyPlan(context.Background(), second, ports.Ports); err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+
+	entries, _, _, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected two entries, got %d", len(entries))
+	}
+	if entries[1].PreviousHash != entries[0].Hash {
+		t.Fatal("the second entry must link to the first")
+	}
+	if entries[1].ConfigBefore != entries[0].ConfigAfter {
+		t.Fatal("the second transaction must start where the first left off")
+	}
+
+	report := store.VerifyLog(context.Background())
+	if !report.Valid() {
+		t.Fatalf("the chain should verify, got %v", report.Problems)
+	}
+}
+
+func TestApplyWithoutAnAuditSinkStillWorks(t *testing.T) {
+	ports := engine.NewMemoryPorts(engine.MemoryOptions{Files: baselineFiles(t)})
+	if _, err := engine.ApplyPlan(context.Background(), planFor(t, withColumns(3)), ports.Ports); err != nil {
+		t.Fatalf("the audit sink is optional: %v", err)
+	}
+}
+
+func TestNoOpApplyRecordsNothing(t *testing.T) {
+	ports, store := auditPorts(t)
+	plan := planFor(t, config.Baseline())
+
+	if _, err := engine.ApplyPlan(context.Background(), plan, ports.Ports); err != nil {
+		t.Fatalf("ApplyPlan: %v", err)
+	}
+
+	report := store.VerifyLog(context.Background())
+	if report.Entries != 0 {
+		t.Fatalf("a no-op changed nothing and should record nothing, got %d entries", report.Entries)
+	}
 }

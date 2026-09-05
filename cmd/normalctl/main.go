@@ -23,6 +23,8 @@ usage:
   normalctl render <config.json>            print the files a config renders to
   normalctl diff <current.json> <desired.json>
   normalctl plan <current.json> <desired.json>
+  normalctl audit verify [dir]              check the audit chain (default /etc/normal)
+  normalctl audit log [dir]                 render transaction history
   normalctl baseline                        print the baseline config
   normalctl schema                          print the CUE schema
 `
@@ -53,6 +55,8 @@ func run(command string, args []string) error {
 		return diff(args)
 	case "plan":
 		return plan(args)
+	case "audit":
+		return auditCommand(args)
 	case "baseline":
 		return emit(config.Baseline())
 	case "schema":

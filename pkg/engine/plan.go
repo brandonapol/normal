@@ -30,6 +30,10 @@ type HealthCheck struct {
 type Plan struct {
 	FromRevision int           `json:"fromRevision"`
 	ToRevision   int           `json:"toRevision"`
+	Intent       string        `json:"intent,omitempty"`
+	ApprovedBy   string        `json:"approvedBy,omitempty"`
+	DigestBefore string        `json:"digestBefore,omitempty"`
+	DigestAfter  string        `json:"digestAfter,omitempty"`
 	Diff         Diff          `json:"diff"`
 	Actions      []Action      `json:"actions"`
 	Services     []string      `json:"services"`
@@ -163,6 +167,8 @@ func PlanApply(current, desired config.Config) (Plan, error) {
 	}
 
 	fileActions := diffFileSets(currentFiles, desiredFiles)
+	digestBefore := Digest(currentFiles)
+	digestAfter := Digest(desiredFiles)
 	touched := make([]string, 0, len(fileActions))
 	for _, action := range fileActions {
 		touched = append(touched, action.Path)
@@ -180,6 +186,8 @@ func PlanApply(current, desired config.Config) (Plan, error) {
 	return Plan{
 		FromRevision: current.Metadata.Revision,
 		ToRevision:   desired.Metadata.Revision,
+		DigestBefore: digestBefore,
+		DigestAfter:  digestAfter,
 		Diff:         diff,
 		Actions:      actions,
 		Services:     services,

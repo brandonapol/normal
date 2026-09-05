@@ -2,8 +2,11 @@ package engine
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/brandonapol/normal/pkg/config"
 )
@@ -110,6 +113,20 @@ func renderWebviewShim(c config.Config) webviewShim {
 		ExemptPackages:                    exempt,
 		PerApp:                            perApp,
 	}
+}
+
+func Digest(files FileSet) string {
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	hasher := sha256.New()
+	for _, path := range paths {
+		_, _ = fmt.Fprintf(hasher, "%s\x00%s\x00", path, files[path])
+	}
+	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 func Render(c config.Config) (FileSet, error) {

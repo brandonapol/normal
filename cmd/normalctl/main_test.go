@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,6 +10,11 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/brandonapol/normal/pkg/agent"
+	"github.com/brandonapol/normal/pkg/audit"
+	"github.com/brandonapol/normal/pkg/config"
+	"github.com/brandonapol/normal/pkg/engine"
 )
 
 const fixedNow = "2026-01-01T00:00:00Z"
@@ -201,5 +207,106 @@ func TestHelp(t *testing.T) {
 	}
 	if !strings.Contains(output, "normalctl") {
 		t.Fatalf("unexpected help output %q", output)
+	}
+}
+
+func auditLogDir(t *testing.T) string {
+	t.Helper()
+
+	files, err := engine.Render(config.Baseline())
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	ports := engine.NewMemoryPorts(engine.MemoryOptions{Files: files})
+	store := audit.NewStore(ports.FS, "/etc/normal")
+	ports.Audit = store
+
+	session := agent.NewSession(agent.SessionOptions{
+		InitialConfig: config.Baseline(),
+		Ports:         ports.Ports,
+	})
+	proposal, rejection := session.Propose("make the home screen two columns",
+		[]agent.Operation{{Op: "set", Path: "/spec/launcher/columns", Value: 2}})
+	if rejection != nil {
+		t.Fatalf("Propose: %v", rejection)
+	}
+	if _, rej := session.Approve(proposal.ID, "brandon"); rej != nil {
+		t.Fatalf("Approve: %v", rej)
+	}
+	if _, rej := session.Apply(context.Background(), proposal.ID); rej != nil {
+		t.Fatalf("Apply: %v", rej)
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "audit.log"),
+		[]byte(ports.FS.Snapshot()["/etc/normal/audit.log"]), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	return dir
+}
+
+func TestAuditLogRendersHistory(t *testing.T) {
+	output, err := capture(t, "audit", "log", auditLogDir(t))
+	if err != nil {
+		t.Fatalf("audit log: %v", err)
+	}
+	for _, want := range []string{"make the home screen two columns", "approved by brandon", "applied", "revision 0 -> 1"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("audit log output is missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestAuditVerifyAcceptsAnIntactChain(t *testing.T) {
+	output, err := capture(t, "audit", "verify", auditLogDir(t))
+	if err != nil {
+		t.Fatalf("an intact chain should verify: %v", err)
+	}
+	if !strings.Contains(output, "chain intact") {
+		t.Fatalf("unexpected output %q", output)
+	}
+}
+
+func TestAuditVerifyRejectsATamperedChain(t *testing.T) {
+	dir := auditLogDir(t)
+	path := filepath.Join(dir, "audit.log")
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	tampered := strings.Replace(string(raw), `"approvedBy":"brandon"`, `"approvedBy":"nobody"`, 1)
+	if tampered == string(raw) {
+		t.Fatal("test setup failed to tamper with the log")
+	}
+	if err := os.WriteFile(path, []byte(tampered), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	output, verifyErr := capture(t, "audit", "verify", dir)
+	if !errors.Is(verifyErr, errInvalidConfig) {
+		t.Fatalf("a tampered chain must fail verification, got %v", verifyErr)
+	}
+	if !strings.Contains(output, "hash-mismatch") {
+		t.Fatalf("the failure should name the problem, got %q", output)
+	}
+}
+
+func TestAuditOnAnEmptyDirectory(t *testing.T) {
+	output, err := capture(t, "audit", "log", t.TempDir())
+	if err != nil {
+		t.Fatalf("an absent log is not an error: %v", err)
+	}
+	if !strings.Contains(output, "no transactions recorded") {
+		t.Fatalf("unexpected output %q", output)
+	}
+}
+
+func TestAuditRejectsUnknownSubcommand(t *testing.T) {
+	if _, err := capture(t, "audit", "frobnicate"); err == nil {
+		t.Fatal("expected an unknown subcommand to error")
+	}
+	if _, err := capture(t, "audit"); err == nil {
+		t.Fatal("expected a missing subcommand to error")
 	}
 }

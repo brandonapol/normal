@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/brandonapol/normal/pkg/audit"
 )
 
 type StepStatus string
@@ -183,6 +185,9 @@ func ApplyPlan(ctx context.Context, plan Plan, ports Ports) (Report, error) {
 		}
 	}
 
+	touched := filePaths(plan)
+	beginAudit(ctx, plan, ports, transactionID, startedAt, touched)
+
 	steps := make([]StepRecord, 0, len(plan.Actions))
 	rollback := func(failed *Action, cause *IOError) error {
 		ports.log(transactionID, "rollback-start", cause.Message)
@@ -193,6 +198,11 @@ func ApplyPlan(ctx context.Context, plan Plan, ports Ports) (Report, error) {
 			kind = "rollback-failed"
 		}
 		ports.log(transactionID, kind, fmt.Sprintf("%d rollback errors", len(rollbackErrors)))
+		outcome := audit.OutcomeRolledBack
+		if !rolledBack {
+			outcome = audit.OutcomeDirty
+		}
+		commitAudit(ctx, plan, ports, transactionID, startedAt, touched, outcome)
 		return &Failure{
 			TransactionID:  transactionID,
 			StartedAt:      startedAt,
@@ -223,6 +233,7 @@ func ApplyPlan(ctx context.Context, plan Plan, ports Ports) (Report, error) {
 		return Report{}, rollback(nil, cause)
 	}
 
+	commitAudit(ctx, plan, ports, transactionID, startedAt, touched, audit.OutcomeApplied)
 	ports.log(transactionID, "transaction-commit", fmt.Sprintf("revision %d", plan.ToRevision))
 	return Report{
 		TransactionID: transactionID,
@@ -231,4 +242,49 @@ func ApplyPlan(ctx context.Context, plan Plan, ports Ports) (Report, error) {
 		Plan:          plan,
 		Steps:         steps,
 	}, nil
+}
+
+func beginAudit(ctx context.Context, plan Plan, ports Ports, transactionID string, startedAt time.Time, touched []string) {
+	if ports.Audit == nil {
+		return
+	}
+	pending := audit.Pending{
+		TransactionID: transactionID,
+		Intent:        plan.Intent,
+		FromRevision:  plan.FromRevision,
+		ToRevision:    plan.ToRevision,
+		ConfigBefore:  plan.DigestBefore,
+		Files:         touched,
+		Services:      plan.Services,
+		StartedAt:     startedAt,
+	}
+	if err := ports.Audit.Begin(ctx, pending); err != nil {
+		ports.log(transactionID, "audit-begin-failed", err.Error())
+	}
+}
+
+func commitAudit(ctx context.Context, plan Plan, ports Ports, transactionID string, startedAt time.Time, touched []string, outcome audit.Outcome) {
+	if ports.Audit == nil {
+		return
+	}
+	entry := audit.Entry{
+		TransactionID: transactionID,
+		Intent:        plan.Intent,
+		ApprovedBy:    plan.ApprovedBy,
+		FromRevision:  plan.FromRevision,
+		ToRevision:    plan.ToRevision,
+		ConfigBefore:  plan.DigestBefore,
+		ConfigAfter:   plan.DigestAfter,
+		Files:         touched,
+		Services:      plan.Services,
+		Outcome:       outcome,
+		StartedAt:     startedAt,
+		FinishedAt:    ports.Clock.Now(),
+	}
+	if outcome != audit.OutcomeApplied {
+		entry.ConfigAfter = plan.DigestBefore
+	}
+	if _, err := ports.Audit.Commit(ctx, entry); err != nil {
+		ports.log(transactionID, "audit-commit-failed", err.Error())
+	}
 }
