@@ -113,6 +113,35 @@ A third came out of writing the targets: `ApplyPatch` accepted the empty pointer
 the whole document, so a single operation could replace an entire config with `null`. The policy
 layer already refused it, but the patch layer now does too.
 
+## Reproducible builds
+
+Two jobs build the same commit on two independent runners and a third compares the digests. If they
+diverge, the build fails — provenance (NRM-103) is worth far more when a third party can rebuild and
+get the same bytes.
+
+`make verify-reproducible` does the local equivalent: it builds in place, builds again from a copy at
+a different path, and compares. Building from a different path is the point — it is what proves
+`-trimpath` is actually doing its job.
+
+```bash
+make verify-reproducible
+make digest                # just print the digest
+```
+
+**What reproduction requires.** Go stamps VCS state into the binary — `vcs.revision`, `vcs.time`, and
+`vcs.modified` — so matching a released digest means checking out the *same commit* with a *clean
+tree*. `make verify-reproducible` refuses to run on a dirty tree rather than reporting a confusing
+mismatch.
+
+The determinism comes from three things, all already in place: `-trimpath` removes absolute paths,
+`CGO_ENABLED=0` removes the host C toolchain from the equation, and the toolchain version is pinned
+by the `go` directive in `go.mod`. Nothing extra was needed to make this work — the check exists to
+notice if it ever stops being true.
+
+**Known limits.** A different Go toolchain version produces different bytes; that is expected and is
+why the toolchain is pinned. The digests compared in CI are for `linux/arm64`; other targets are
+built but not yet digest-checked.
+
 ## Bill of materials
 
 `make sbom` produces a CycloneDX 1.6 document covering every module including the standard library,

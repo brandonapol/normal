@@ -7,6 +7,7 @@ GO_LICENSES_VERSION ?= v2.0.0-alpha.1
 ALLOWED_LICENCES ?= Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC
 CYCLONEDX_VERSION ?= v1.9.0
 SBOM_FILE := sbom.cdx.json
+ARM64_BUILD = CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags="-s -w"
 COVERAGE_THRESHOLD ?= 75
 FUZZTIME ?= 30s
 COVERAGE_FILE := coverage.out
@@ -37,6 +38,7 @@ help:
 	@echo "  make vuln          govulncheck"
 	@echo "  make licences      fail on a dependency outside the licence allowlist"
 	@echo "  make sbom          CycloneDX bill of materials into $(SBOM_FILE)"
+	@echo "  make verify-reproducible   build twice from different paths, compare digests"
 	@echo "  make clean"
 
 $(TOOLS_DIR):
@@ -160,9 +162,35 @@ build:
 
 .PHONY: build-arm64
 build-arm64:
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags="-s -w" \
-		-o $(BIN_DIR)/normalctl-linux-arm64 ./cmd/normalctl
+	$(ARM64_BUILD) -o $(BIN_DIR)/normalctl-linux-arm64 ./cmd/normalctl
 	@ls -lh $(BIN_DIR)/normalctl-linux-arm64 | awk '{print "linux/arm64 static binary:", $$5}'
+
+.PHONY: digest
+digest:
+	@mkdir -p $(BIN_DIR)
+	@$(ARM64_BUILD) -o $(BIN_DIR)/normalctl-digest ./cmd/normalctl
+	@sha256sum $(BIN_DIR)/normalctl-digest | cut -d' ' -f1
+
+.PHONY: verify-reproducible
+verify-reproducible:
+	@set -e; \
+	if [ -n "$$(git status --porcelain)" ]; then \
+		echo "verify-reproducible: the working tree is dirty."; \
+		echo "Go stamps vcs.modified into the binary, so a dirty tree cannot match a clean build."; \
+		exit 1; \
+	fi; \
+	tmp=$$(mktemp -d); \
+	trap 'rm -rf $$tmp' EXIT; \
+	$(ARM64_BUILD) -o $$tmp/first ./cmd/normalctl; \
+	cp -a . $$tmp/src; \
+	( cd $$tmp/src && $(ARM64_BUILD) -o $$tmp/second ./cmd/normalctl ); \
+	first=$$(sha256sum $$tmp/first | cut -d" " -f1); \
+	second=$$(sha256sum $$tmp/second | cut -d" " -f1); \
+	if [ "$$first" != "$$second" ]; then \
+		echo "builds diverged:"; echo "  $$first (in place)"; echo "  $$second (copied path)"; \
+		exit 1; \
+	fi; \
+	echo "reproducible across build paths: $$first"
 
 .PHONY: vuln
 vuln: $(GOVULNCHECK)

@@ -139,11 +139,60 @@ jobs:
           path: sbom.cdx.json
           retention-days: 90
 
+  reproducible:
+    name: reproducible build ${{ matrix.attempt }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        attempt: [1, 2]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build and record the digest
+        run: make digest | tee digest-${{ matrix.attempt }}.txt
+
+      - name: Upload digest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: digest-${{ matrix.attempt }}
+          path: digest-${{ matrix.attempt }}.txt
+          retention-days: 7
+
+  reproducible-compare:
+    name: digests agree
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: reproducible
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Compare digests from two independent runners
+        run: |
+          first=$(cat digest-1.txt)
+          second=$(cat digest-2.txt)
+          echo "runner 1: $first"
+          echo "runner 2: $second"
+          if [ "$first" != "$second" ]; then
+            echo "the same commit produced different binaries on two runners"
+            exit 1
+          fi
+          echo "reproducible: $first"
+
   ci-passed:
     name: ci passed
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [verify, test, invariants, build]
+    needs: [verify, test, invariants, build, reproducible-compare]
     if: always()
     steps:
       - name: Fail if any required job did not succeed
