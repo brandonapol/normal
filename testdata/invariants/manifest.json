@@ -90,6 +90,16 @@
       "file": "reject/unknown-launcher-field.json",
       "code": "schema-violation",
       "why": "definitions stay closed everywhere, not only under attention"
+    },
+    {
+      "file": "reject/pattern-too-long.json",
+      "code": "pattern-too-long",
+      "why": "a detector regex must be bounded before it is compiled"
+    },
+    {
+      "file": "reject/document-too-deep.json",
+      "code": "document-too-deep",
+      "why": "nesting is bounded before the schema evaluator sees the document"
     }
   ],
   "accept": [

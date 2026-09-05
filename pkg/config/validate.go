@@ -45,6 +45,11 @@ type Limits struct {
 	MaxSessionBudgets           int `json:"maxSessionBudgets"`
 	MaxDetectors                int `json:"maxDetectors"`
 	MaxLabelCount               int `json:"maxLabelCount"`
+	MaxDocumentBytes            int `json:"maxDocumentBytes"`
+	MaxDocumentDepth            int `json:"maxDocumentDepth"`
+	MaxDocumentNodes            int `json:"maxDocumentNodes"`
+	MaxPatternLength            int `json:"maxPatternLength"`
+	ValidationTimeoutMs         int `json:"validationTimeoutMs"`
 }
 
 type compiled struct {
@@ -147,7 +152,14 @@ func structuralIssues(raw []byte) []Issue {
 	}
 
 	unified := c.def.Unify(encoded)
-	validationErr := unified.Validate(cue.Concrete(true), cue.All())
+	validationErr, timedOut := validateWithTimeout(unified, c.limits)
+	if timedOut {
+		return []Issue{{
+			Path:    "/",
+			Code:    "evaluation-timeout",
+			Message: fmt.Sprintf("validation did not finish within %dms", c.limits.ValidationTimeoutMs),
+		}}
+	}
 	if validationErr == nil {
 		return nil
 	}
@@ -169,9 +181,14 @@ func structuralIssues(raw []byte) []Issue {
 }
 
 func Validate(document any, now time.Time) []Issue {
+	limits := load().limits
+
 	raw, err := json.Marshal(document)
 	if err != nil {
 		return []Issue{{Path: "/", Code: "invalid-document", Message: err.Error()}}
+	}
+	if issues := resourceIssues(raw, document, limits); len(issues) > 0 {
+		return issues
 	}
 	if issues := structuralIssues(raw); len(issues) > 0 {
 		return issues
@@ -181,7 +198,7 @@ func Validate(document any, now time.Time) []Issue {
 	if err := json.Unmarshal(raw, &typed); err != nil {
 		return []Issue{{Path: "/", Code: "invalid-document", Message: err.Error()}}
 	}
-	return semanticIssues(typed, now, load().limits)
+	return semanticIssues(typed, now, limits)
 }
 
 func ValidateConfig(c Config, now time.Time) []Issue {

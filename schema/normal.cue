@@ -25,6 +25,12 @@ limits: {
 	maxSessionBudgets:           32
 	maxDetectors:                32
 	maxLabelCount:               16
+
+	maxDocumentBytes:    1048576
+	maxDocumentDepth:    64
+	maxDocumentNodes:    20000
+	maxPatternLength:    256
+	validationTimeoutMs: 5000
 }
 
 #PackageID:  =~"^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+$"

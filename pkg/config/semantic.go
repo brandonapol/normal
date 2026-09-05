@@ -110,9 +110,16 @@ func checkAttention(l *issueList, c Config, now time.Time, limits Limits) {
 	for i, detector := range policy.Detectors {
 		detectorIDs = append(detectorIDs, detector.ID)
 		if detector.Kind == "url-pattern" {
-			if _, err := regexp.Compile(detector.Pattern); err != nil {
-				l.add(fmt.Sprintf("/spec/attention/infiniteScroll/detectors/%d/pattern", i),
-					"invalid-format", "expected a valid regular expression")
+			path := fmt.Sprintf("/spec/attention/infiniteScroll/detectors/%d/pattern", i)
+			switch {
+			case len(detector.Pattern) > limits.MaxPatternLength:
+				l.add(path, "pattern-too-long", fmt.Sprintf(
+					"pattern is %d characters; the limit is %d",
+					len(detector.Pattern), limits.MaxPatternLength))
+			default:
+				if _, err := regexp.Compile(detector.Pattern); err != nil {
+					l.add(path, "invalid-format", "expected a valid regular expression")
+				}
 			}
 		}
 	}

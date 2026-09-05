@@ -140,6 +140,23 @@ checks CUE cannot express — see the table in `docs/architecture.md`.
 The `limits` block in `normal.cue` is regular data, not a definition, so the same numbers constrain
 the schema *and* are readable from Go via `config.SchemaLimits()`. Nothing is declared twice.
 
+### Resource guards
+
+Before either pass runs, the document is checked against caps that also live in `limits`:
+`maxDocumentBytes`, `maxDocumentDepth`, `maxDocumentNodes`. A document over any of them is rejected
+immediately with `document-too-large`, `document-too-deep`, or `document-too-complex`, and no
+further work is done — an agent-supplied document should not be able to spend unbounded time or
+memory in the evaluator.
+
+Two more caps apply inside the semantic pass. `maxPatternLength` bounds a `url-pattern` detector's
+regex *before* it is compiled, since compiling the pattern is itself the cost. `validationTimeoutMs`
+bounds CUE evaluation and returns `evaluation-timeout` rather than hanging.
+
+The timeout is defence in depth rather than the primary control: the input caps are what actually
+bound the work. If evaluation ever did exceed the timeout the caller returns cleanly, but the
+evaluating goroutine is not interruptible and would leak — an acceptable, documented trade for a
+process that applies a handful of changes a day, and a reason to keep the input caps meaningful.
+
 ## Extending it
 
 Add a field: extend `normal.cue` and the matching Go struct, then add it to the ownership table in
