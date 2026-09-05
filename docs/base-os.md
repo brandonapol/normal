@@ -79,7 +79,11 @@ easier to under-promise on the layer and over-deliver on the image than to walk 
 ## What this repo assumes
 
 Nothing above. Everything here — schema, engine, agent tools — is base-OS independent. The engine
-touches the device through `FileSystemPort` and `ServiceHostPort`, so the layered version implements
-those against app-private storage plus a privileged helper, and the forked version implements them
-against real system paths and init services. Same code either way, which is the point of building
-this part first.
+touches the device through the `FileSystem` and `ServiceHost` interfaces, so the layered version
+implements those against app-private storage plus a privileged helper, and the forked version
+implements them against real system paths and init services. Same code either way, which is the
+point of building this part first.
+
+Go helps here specifically: the daemons cross-compile to static ARM64 binaries with no runtime to
+install alongside them, which is what you want whether they ship inside a system app on stock
+GrapheneOS or as init services in your own image.

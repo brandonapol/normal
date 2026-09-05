@@ -78,6 +78,9 @@ reading view" is a pull request, not a kernel patch. Ship it as a separate versi
 by the config, the way ad-blocking filter lists work — and note that filter lists are the proof this
 model sustains a community for a decade.
 
+Writing the registry entries in CUE rather than JSON would let contributors' entries be checked
+against `#SurfaceDetector` at review time, in CI, without anyone running the OS.
+
 It reduces false positives for approaches 1–3 rather than enforcing anything itself.
 
 ## Approach 5 — Network interception (rejected)

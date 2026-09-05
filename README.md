@@ -11,61 +11,87 @@ machine against a mocked filesystem and service host.
 
 1. **The agent never touches the filesystem.** It proposes a diff against a versioned schema. The
    mutation engine validates, plans, applies, and rolls back. That boundary is the safety story.
-2. **No infinite scroll, anywhere.** This is encoded in the schema, not in a settings toggle. There
-   is no `enforcement: "off"`; the detector list cannot be emptied; the webview shim cannot be
-   disabled. The strongest thing anyone — user or agent — can express is a bounded, justified,
-   expiring exemption for one app.
+2. **No infinite scroll, anywhere.** This is encoded in the schema, not in a settings toggle. The
+   enforcement enum has no `off` member, the detector list is typed as non-empty, and the webview
+   shim flag is typed as the literal `true`. The strongest thing anyone — user or agent — can
+   express is a bounded, justified, expiring exemption for one app.
 
 ## Layout
 
 ```
-packages/
-  schema/        @normal/schema      the protocol: types, validator, pointers, baseline config
-  engine/        @normal/engine      diff -> plan -> apply -> rollback, over injected ports
-  agent-tools/   @normal/agent-tools the agent's entire surface: tool defs, policy, session
-examples/
-  baseline.config.json               the default config, generated from code
-docs/
-  architecture.md                    package boundaries and why they are where they are
-  config-schema.md                   the v0 schema, field by field
-  agent-interface.md                 the tool contract and its guarantees
-  infinite-scroll.md                 four enforcement approaches, with a recommendation
-  base-os.md                         GrapheneOS as the base: the case for, and against
+schema/normal.cue        the protocol: types, constraints, and limits, in CUE
+pkg/config/              Go bindings, JSON pointers, validation (CUE + semantic)
+pkg/engine/              diff -> plan -> apply -> rollback, over injected ports
+pkg/agent/               the agent's entire surface: tool defs, policy, session
+cmd/normalctl/           dev CLI: validate, render, diff, plan
+examples/                the baseline config, generated from code
+docs/                    architecture, schema, agent contract, scroll blocking, base OS
 ```
 
-Dependencies flow one way: `schema <- engine <- agent-tools`. Nothing depends on Android, and
-nothing outside `engine/src/apply.ts` and the port implementations performs I/O.
+Dependencies flow one way: `schema <- config <- engine <- agent`. Nothing depends on Android, and
+nothing outside `pkg/engine/apply.go` and the port implementations performs I/O.
+
+## Two languages, on purpose
+
+**CUE owns the protocol.** `schema/normal.cue` is the single source of truth for shape, enums,
+bounds, and the product invariants. It is embedded in the binary and evaluated at runtime, so there
+is no hand-written validator to drift from it, and the numeric limits are read back out of the
+schema rather than duplicated in Go.
+
+**Go owns everything else** — the engine, the agent boundary, the daemons. It cross-compiles to a
+static ARM64 binary with no runtime to ship alongside it.
+
+The division is not arbitrary. CUE expresses constraints Go's type system cannot:
+
+```cue
+#Enforcement: "warn" | "paginate" | "block"
+detectors: [#Detector, ...#Detector]
+webview: injectShim: true
+exemptions: [...#Exemption] & list.MaxItems(limits.maxExemptions)
+```
+
+Go handles what CUE is bad at: cross-references between sections, anything involving the current
+time, and duplicate-key detection. `docs/architecture.md` has the full split.
 
 ## Quickstart
 
 ```bash
-npm install
-npm run build      # typecheck via project references
-npm test           # 84 tests, no device required
-npm run emit:example
+go build ./...
+go test ./...                                     # 73 tests, no device required
+go run ./cmd/normalctl baseline > examples/baseline.config.json
+go run ./cmd/normalctl validate examples/baseline.config.json
+go run ./cmd/normalctl plan current.json desired.json
 ```
 
 A change, end to end:
 
-```ts
-const ports = createMemoryPorts({ files: renderConfig(BASELINE_CONFIG) });
-const session = createAgentSession({ initialConfig: BASELINE_CONFIG, ports });
+```go
+ports := engine.NewMemoryPorts(engine.MemoryOptions{Files: files})
+session := agent.NewSession(agent.SessionOptions{
+    InitialConfig: config.Baseline(),
+    Ports:         ports.Ports,
+})
 
-await dispatchTool(session, {
-  name: "propose_change",
-  arguments: {
-    intent: "put Spotify on wifi only",
-    operations: [
-      { op: "set", path: "/spec/apps/entries/com.spotify.music/network", value: "wifi-only" },
-    ],
-  },
-});
+agent.Dispatch(ctx, session, agent.ToolCall{
+    Name: "propose_change",
+    Arguments: map[string]any{
+        "intent": "put Spotify on wifi only",
+        "operations": []any{map[string]any{
+            "op":    "set",
+            "path":  "/spec/apps/entries/com.spotify.music/network",
+            "value": "wifi-only",
+        }},
+    },
+})
 
-session.approve("proposal-0001", "user");   // not reachable from any tool
-await dispatchTool(session, { name: "apply_proposal", arguments: { proposalId: "proposal-0001" } });
+session.Approve("proposal-0001", "user")   // not reachable from any tool
+agent.Dispatch(ctx, session, agent.ToolCall{
+    Name:      "apply_proposal",
+    Arguments: map[string]any{"proposalId": "proposal-0001"},
+})
 ```
 
-Swap `createMemoryPorts` for real ones and the same code runs on hardware.
+Swap `NewMemoryPorts` for real ones and the same code runs on hardware.
 
 ## Status
 

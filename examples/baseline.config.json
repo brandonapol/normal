@@ -51,15 +51,15 @@
         "search": true
       },
       "gestures": {
-        "swipe-up": {
-          "kind": "open-drawer"
+        "long-press-home": {
+          "kind": "toggle",
+          "target": "grayscale"
         },
         "swipe-down": {
           "kind": "open-notifications"
         },
-        "long-press-home": {
-          "kind": "toggle",
-          "target": "grayscale"
+        "swipe-up": {
+          "kind": "open-drawer"
         }
       }
     },
@@ -116,9 +116,9 @@
           "state": "installed",
           "network": "allow",
           "permissions": {
+            "background-activity": "allow",
             "notifications": "allow",
-            "storage": "allow",
-            "background-activity": "allow"
+            "storage": "allow"
           }
         },
         {
@@ -128,9 +128,9 @@
           "state": "installed",
           "network": "allow",
           "permissions": {
+            "background-activity": "deny",
             "location": "ask",
-            "notifications": "deny",
-            "background-activity": "deny"
+            "notifications": "deny"
           }
         }
       ]

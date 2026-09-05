@@ -1,8 +1,8 @@
 # Config schema v0
 
-`apiVersion: normal.os/v0`, `kind: PhoneConfig`. The canonical types are in
-`packages/schema/src/types.ts`; this is the prose version. A complete valid document is in
-`examples/baseline.config.json`.
+`apiVersion: normal.os/v0`, `kind: PhoneConfig`. The canonical definition is `schema/normal.cue`;
+this is the prose version, and `pkg/config/types.go` is the Go binding. A complete valid document is
+in `examples/baseline.config.json` (regenerate with `go run ./cmd/normalctl baseline`).
 
 ```yaml
 apiVersion: normal.os/v0
@@ -93,22 +93,59 @@ Per-app, per-domain, or system-wide time budgets with `dailyMinutes`, `sessionMi
 `cooldownMinutes`, and `onExhausted` (`warn` | `grayscale` | `lock`). A session budget cannot exceed
 its daily budget.
 
+## How the invariants are expressed
+
+The point of writing the schema in CUE is that the product invariants are *types*, not checks that
+someone could forget to run:
+
+```cue
+#Enforcement: "warn" | "paginate" | "block"
+
+#InfiniteScrollPolicy: {
+	detectors:  [#Detector, ...#Detector]
+	exemptions: [...#Exemption] & list.MaxItems(limits.maxExemptions)
+	webview:    #WebViewEnforcement
+}
+
+#WebViewEnforcement: {
+	injectShim: true
+	...
+}
+
+#Exemption: {
+	reason:    string & strings.MinRunes(limits.minExemptionReasonLength)
+	expiresAt: time.Time
+}
+```
+
+`#Enforcement` has no `off` member, so "off" is not a value the type admits. `detectors` is typed as
+a non-empty list, so emptying it is a type error. `injectShim: true` is a field whose type is a
+single value, so `false` does not unify. None of these are validator branches that a refactor could
+drop.
+
+Definitions (`#Name`) are closed in CUE, so unknown fields are rejected everywhere, at every depth,
+without a single line of code.
+
 ## Validation
 
-`validateConfig(input, { now })` returns `Result<NormalConfig, ValidationIssue[]>` — every issue at
-once, each with a JSON pointer, a stable machine-readable `code`, and a human message. Codes are
-part of the protocol: tooling can branch on `dangling-reference` or `policy-violation` without
-parsing prose.
+`config.Validate(document, now)` returns `[]Issue`, each with a JSON pointer, a stable
+machine-readable `code`, and a human message. Codes are part of the protocol: tooling can branch on
+`dangling-reference` or `policy-violation` without parsing prose.
 
-Checks run in three layers: shape and enums, then per-section limits (`packages/schema/src/limits.ts`),
-then cross-section reference integrity.
+Two passes. First CUE unifies the document with `#PhoneConfig` and every structural failure is
+reported at once; CUE's own message is kept except where a friendlier one exists for a product
+invariant. If the shape is wrong, validation stops there. Otherwise the Go semantic pass runs the
+checks CUE cannot express — see the table in `docs/architecture.md`.
+
+The `limits` block in `normal.cue` is regular data, not a definition, so the same numbers constrain
+the schema *and* are readable from Go via `config.SchemaLimits()`. Nothing is declared twice.
 
 ## Extending it
 
-Add a field: extend the type, extend the validator, add it to the ownership table in
-`engine/src/ownership.ts` so the engine knows which file it renders into and which service reads it.
+Add a field: extend `normal.cue` and the matching Go struct, then add it to the ownership table in
+`pkg/engine/ownership.go` so the engine knows which file it renders into and which service reads it.
 An unowned path is a plan error, so you cannot ship a field the engine silently ignores.
 
-Add a keyed collection: register it in `schema/src/keys.ts` and pointers and diffs pick it up.
+Add a keyed collection: register it in `pkg/config/keys.go` and pointers and diffs pick it up.
 
 Breaking changes bump `apiVersion` and ship a migration. v0 makes no compatibility promises yet.
