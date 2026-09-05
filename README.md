@@ -110,3 +110,8 @@ Swap `NewMemoryPorts` for real ones and the same code runs on hardware.
 
 v0. The schema covers launcher, apps, notifications, and attention policy. Theme, connectivity,
 and update policy are not modelled yet. Nothing here has touched a phone.
+
+[`ROADMAP.md`](ROADMAP.md) lays out the path from here to a device: supply-chain hardening, config
+integrity and recovery, mobile bindings, device integration, the on-device agent, scroll
+enforcement, and the protocol work that makes the schema forkable. 54 tickets in
+[`docs/roadmap/`](docs/roadmap/).
