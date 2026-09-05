@@ -111,7 +111,8 @@ Swap `NewMemoryPorts` for real ones and the same code runs on hardware.
 v0. The schema covers launcher, apps, notifications, and attention policy. Theme, connectivity,
 and update policy are not modelled yet. Nothing here has touched a phone.
 
-Security policy and reporting: [`SECURITY.md`](SECURITY.md).
+Security policy and reporting: [`SECURITY.md`](SECURITY.md). The trust boundaries, attacker
+classes, and the current gap list are in [`docs/security/threat-model.md`](docs/security/threat-model.md).
 
 [`ROADMAP.md`](ROADMAP.md) lays out the path from here to a device: supply-chain hardening, config
 integrity and recovery, mobile bindings, device integration, the on-device agent, scroll
