@@ -129,6 +129,16 @@ jobs:
           path: bin/normalctl-linux-arm64
           retention-days: 14
 
+      - name: Bill of materials
+        run: make sbom
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          retention-days: 90
+
   ci-passed:
     name: ci passed
     runs-on: ubuntu-latest

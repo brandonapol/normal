@@ -5,12 +5,15 @@ GOLANGCI_LINT_VERSION ?= v2.6.2
 GOVULNCHECK_VERSION ?= v1.1.4
 GO_LICENSES_VERSION ?= v2.0.0-alpha.1
 ALLOWED_LICENCES ?= Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC
+CYCLONEDX_VERSION ?= v1.9.0
+SBOM_FILE := sbom.cdx.json
 COVERAGE_THRESHOLD ?= 75
 FUZZTIME ?= 30s
 COVERAGE_FILE := coverage.out
 GOLANGCI_LINT := $(TOOLS_DIR)/golangci-lint
 GOVULNCHECK := $(TOOLS_DIR)/govulncheck
 GO_LICENSES := $(TOOLS_DIR)/go-licenses
+CYCLONEDX := $(TOOLS_DIR)/cyclonedx-gomod
 
 .DEFAULT_GOAL := help
 
@@ -33,6 +36,7 @@ help:
 	@echo "  make build-arm64   static linux/arm64 daemon binary"
 	@echo "  make vuln          govulncheck"
 	@echo "  make licences      fail on a dependency outside the licence allowlist"
+	@echo "  make sbom          CycloneDX bill of materials into $(SBOM_FILE)"
 	@echo "  make clean"
 
 $(TOOLS_DIR):
@@ -47,8 +51,11 @@ $(GOVULNCHECK): | $(TOOLS_DIR)
 $(GO_LICENSES): | $(TOOLS_DIR)
 	GOBIN=$(CURDIR)/$(TOOLS_DIR) $(GO) install github.com/google/go-licenses/v2@$(GO_LICENSES_VERSION)
 
+$(CYCLONEDX): | $(TOOLS_DIR)
+	GOBIN=$(CURDIR)/$(TOOLS_DIR) $(GO) install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@$(CYCLONEDX_VERSION)
+
 .PHONY: tools
-tools: $(GOLANGCI_LINT) $(GOVULNCHECK) $(GO_LICENSES)
+tools: $(GOLANGCI_LINT) $(GOVULNCHECK) $(GO_LICENSES) $(CYCLONEDX)
 
 .PHONY: fmt
 fmt:
@@ -168,6 +175,21 @@ licences: $(GO_LICENSES)
 		--ignore github.com/brandonapol/normal
 	@echo "every dependency is under an allowed licence"
 
+.PHONY: sbom
+sbom: $(CYCLONEDX)
+	@command -v jq >/dev/null 2>&1 || { echo "sbom: jq is required"; exit 2; }
+	$(CYCLONEDX) mod -json -licenses -std -output $(SBOM_FILE) .
+	@schema_sha=$$(sha256sum schema/normal.cue | cut -d' ' -f1); \
+	api=$$($(GO) run ./cmd/normalctl baseline | jq -r .apiVersion); \
+	jq --arg sha "$$schema_sha" --arg api "$$api" \
+		'.metadata.properties = ((.metadata.properties // []) + [{"name":"normal:schema:sha256","value":$$sha},{"name":"normal:schema:apiVersion","value":$$api}])' \
+		$(SBOM_FILE) > $(SBOM_FILE).tmp && mv $(SBOM_FILE).tmp $(SBOM_FILE)
+	@jq -e '.bomFormat == "CycloneDX" and (.specVersion | tonumber >= 1.6) and (.components | length > 0)' \
+		$(SBOM_FILE) > /dev/null || { echo "sbom: output is not a usable CycloneDX document"; exit 1; }
+	@jq -e '[.components[].name] | any(startswith("cuelang.org/go"))' $(SBOM_FILE) > /dev/null \
+		|| { echo "sbom: the CUE evaluator is missing from the bill"; exit 1; }
+	@echo "$(SBOM_FILE): $$(jq '.components | length' $(SBOM_FILE)) components, schema $$(jq -r '.metadata.properties[] | select(.name=="normal:schema:apiVersion") | .value' $(SBOM_FILE))"
+
 .PHONY: licence-report
 licence-report: $(GO_LICENSES)
 	@$(GO_LICENSES) report ./... --ignore github.com/brandonapol/normal 2>/dev/null
@@ -179,4 +201,4 @@ ci: tidy-check fmt-check schema vet lint test-race cover fuzz-smoke invariants d
 
 .PHONY: clean
 clean:
-	rm -rf $(BIN_DIR) $(COVERAGE_FILE)
+	rm -rf $(BIN_DIR) $(COVERAGE_FILE) $(SBOM_FILE)

@@ -14,7 +14,7 @@ make ci     # tidy-check fmt-check schema vet lint test-race cover invariants dr
 | `static checks` | `go.mod` tidy, gofmt, `go vet`, golangci-lint, `cue fmt --check`, `cue vet` |
 | `tests` | race detector, plus a coverage floor, on the pinned Go and on `stable` |
 | `product invariants` | the frozen fixture corpus, and that generated files match their source |
-| `build` | host build and a static `linux/arm64` daemon binary |
+| `build` | host build, a static `linux/arm64` daemon binary, and the SBOM |
 | `ci passed` | one gate job to require in branch protection |
 
 `security.yml` runs `govulncheck` and the licence gate on pushes, PRs, and weekly on a schedule, so
@@ -112,6 +112,20 @@ Two, both within seconds of the first run:
 A third came out of writing the targets: `ApplyPatch` accepted the empty pointer, which addresses
 the whole document, so a single operation could replace an entire config with `null`. The policy
 layer already refused it, but the patch layer now does too.
+
+## Bill of materials
+
+`make sbom` produces a CycloneDX 1.6 document covering every module including the standard library,
+uploaded by CI and retained for 90 days.
+
+Two properties are injected beyond what `cyclonedx-gomod` emits: `normal:schema:sha256` and
+`normal:schema:apiVersion`. The schema is the protocol and it is embedded in the binary, so "which
+version of the config contract does this build speak" is a supply-chain question, and the answer
+belongs in the bill rather than only in a git tag.
+
+The target self-checks: it fails if the output is not CycloneDX ≥ 1.6, if it has no components, or
+if the CUE evaluator is missing from the bill. A generator that silently emits an empty document is
+worse than no generator.
 
 ## Coverage
 
