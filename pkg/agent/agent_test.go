@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/brandonapol/normal/pkg/agent"
+	"github.com/brandonapol/normal/pkg/audit"
+	"github.com/brandonapol/normal/pkg/baseline"
 	"github.com/brandonapol/normal/pkg/config"
 	"github.com/brandonapol/normal/pkg/engine"
 )
@@ -662,5 +664,168 @@ func TestLooseningTheAppPolicyIsARegression(t *testing.T) {
 
 	if len(agent.SecurityRegressions(after, before)) != 0 {
 		t.Fatal("tightening back to an allowlist is not a regression")
+	}
+}
+
+func sealedSession(t *testing.T, key *audit.SoftwareSigner) (*agent.Session, engine.MemoryPorts, audit.Store) {
+	t.Helper()
+
+	files, err := engine.Render(config.Baseline())
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	ports := engine.NewMemoryPorts(engine.MemoryOptions{Files: files})
+	store := audit.NewStore(ports.FS, "/etc/normal").WithSigner(key)
+	ports.Audit = store
+
+	sealed, err := baseline.Seal(config.Baseline(), key)
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+
+	session := agent.NewSession(agent.SessionOptions{
+		InitialConfig:                 config.Baseline(),
+		Ports:                         ports.Ports,
+		ApprovalRequiredForEverything: agent.ApprovalNotRequiredForEverything(),
+		SealedBaseline:                &sealed,
+		BaselinePublicKey:             key.PublicKey(),
+	})
+	return session, ports, store
+}
+
+func baselineSigner(t *testing.T, offset byte) *audit.SoftwareSigner {
+	t.Helper()
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i) + offset
+	}
+	made, err := audit.NewSoftwareSignerFromSeed(seed)
+	if err != nil {
+		t.Fatalf("signer: %v", err)
+	}
+	return made
+}
+
+func TestResetReturnsToTheSealedBaseline(t *testing.T) {
+	key := baselineSigner(t, 0)
+	session, ports, store := sealedSession(t, key)
+
+	applyProposal(t, session, "wander away from the baseline", []any{
+		map[string]any{"op": "set", "path": "/spec/launcher/columns", "value": 4},
+		map[string]any{"op": "set", "path": "/spec/notifications/defaultDisposition", "value": "block"},
+	})
+	if session.Current().Spec.Launcher.Columns != 4 {
+		t.Fatal("the drift change did not take effect")
+	}
+
+	proposal, rejection := session.ProposeReset()
+	if rejection != nil {
+		t.Fatalf("ProposeReset: %v", rejection)
+	}
+	if !proposal.Evaluation.RequiresApproval {
+		t.Fatal("a factory reset must always require approval")
+	}
+
+	session.Approve(proposal.ID, "user")
+	if _, rej := session.Apply(context.Background(), proposal.ID); rej != nil {
+		t.Fatalf("Apply: %v", rej)
+	}
+
+	restored := session.Current()
+	if restored.Spec.Launcher.Columns != config.Baseline().Spec.Launcher.Columns {
+		t.Fatal("reset did not restore the launcher")
+	}
+	if restored.Spec.Notifications.DefaultDisposition != config.Baseline().Spec.Notifications.DefaultDisposition {
+		t.Fatal("reset did not restore notifications")
+	}
+
+	if restored.Metadata.Revision <= 1 {
+		t.Fatalf("reset moves forward to a new revision, got %d", restored.Metadata.Revision)
+	}
+
+	report := store.VerifyLog(context.Background())
+	if !report.Valid() {
+		t.Fatalf("the audit chain should survive a reset, got %v", report.Problems)
+	}
+
+	entries, _, _, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	last := entries[len(entries)-1]
+	if !strings.Contains(last.Intent, "sealed baseline") {
+		t.Fatalf("the reset should be auditable by intent, got %q", last.Intent)
+	}
+
+	expected := config.Baseline()
+	expected.Metadata.Revision = restored.Metadata.Revision
+	rendered, err := engine.Render(expected)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if last.ConfigAfter != engine.Digest(rendered) {
+		t.Fatal("after a reset the config should be the baseline, carried at the new revision")
+	}
+
+	plain, err := engine.Render(config.Baseline())
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, file := range []string{
+		engine.FileLauncher, engine.FileApps,
+		engine.FileNotifications, engine.FileAttention,
+	} {
+		if ports.FS.Snapshot()[file] != plain[file] {
+			t.Errorf("%s should match the baseline byte for byte after a reset", file)
+		}
+	}
+}
+
+func TestResetWithoutASealedBaselineIsRefused(t *testing.T) {
+	session := newPermissiveSession(t)
+	_, rejection := session.ProposeReset()
+	if rejection == nil {
+		t.Fatal("a device with no sealed baseline cannot reset")
+	}
+	if rejection.Kind != agent.RejectNoBaseline {
+		t.Fatalf("expected no-sealed-baseline, got %s", rejection.Kind)
+	}
+}
+
+func TestResetRefusesAnUntrustworthyBaseline(t *testing.T) {
+	ours := baselineSigner(t, 0)
+	theirs := baselineSigner(t, 100)
+
+	files, _ := engine.Render(config.Baseline())
+	ports := engine.NewMemoryPorts(engine.MemoryOptions{Files: files})
+	foreign, err := baseline.Seal(config.Baseline(), theirs)
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+
+	session := agent.NewSession(agent.SessionOptions{
+		InitialConfig:     config.Baseline(),
+		Ports:             ports.Ports,
+		SealedBaseline:    &foreign,
+		BaselinePublicKey: ours.PublicKey(),
+	})
+
+	_, rejection := session.ProposeReset()
+	if rejection == nil {
+		t.Fatal("a baseline signed by another key must not be reset to")
+	}
+	if rejection.Kind != agent.RejectBadBaseline {
+		t.Fatalf("expected unusable-baseline, got %s", rejection.Kind)
+	}
+	if !strings.Contains(rejection.Error(), "cannot be trusted") {
+		t.Fatalf("the rejection should say why, got %q", rejection.Error())
+	}
+}
+
+func TestNoToolCanFactoryResetTheDevice(t *testing.T) {
+	for _, name := range agent.ToolNames {
+		if strings.Contains(name, "reset") {
+			t.Fatalf("a factory reset must be a person's decision, not a tool call: %q", name)
+		}
 	}
 }

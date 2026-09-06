@@ -27,6 +27,7 @@ usage:
   normalctl audit verify [dir]              check the audit chain (default /etc/normal)
   normalctl audit log [dir]                 render transaction history
   normalctl baseline                        print the baseline config
+  normalctl seal <key.seed>                 print a signed, sealed baseline
   normalctl schema                          print the CUE schema
 `
 
@@ -62,6 +63,8 @@ func run(command string, args []string) error {
 		return auditCommand(args)
 	case "baseline":
 		return emit(config.Baseline())
+	case "seal":
+		return sealCommand(args)
 	case "schema":
 		_, err := os.Stdout.Write(schema.Source)
 		return err

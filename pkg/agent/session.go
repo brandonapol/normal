@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brandonapol/normal/pkg/baseline"
 	"github.com/brandonapol/normal/pkg/config"
 	"github.com/brandonapol/normal/pkg/engine"
 )
@@ -20,6 +21,8 @@ const (
 	RejectPlan            RejectionKind = "plan"
 	RejectUnknownRevision RejectionKind = "unknown-revision"
 	RejectQuotaExceeded   RejectionKind = "quota-exceeded"
+	RejectNoBaseline      RejectionKind = "no-sealed-baseline"
+	RejectBadBaseline     RejectionKind = "unusable-baseline"
 )
 
 type Rejection struct {
@@ -171,10 +174,14 @@ type SessionOptions struct {
 	InitialConfig                 config.Config
 	Ports                         engine.Ports
 	ApprovalRequiredForEverything *bool
+	SealedBaseline                *baseline.Sealed
+	BaselinePublicKey             []byte
 }
 
 type Session struct {
 	mu            sync.Mutex
+	sealed        *baseline.Sealed
+	baselineKey   []byte
 	ports         engine.Ports
 	current       config.Config
 	counter       int
@@ -197,6 +204,8 @@ func NewSession(options SessionOptions) *Session {
 	}
 	return &Session{
 		ports:         options.Ports,
+		sealed:        options.SealedBaseline,
+		baselineKey:   options.BaselinePublicKey,
 		current:       options.InitialConfig,
 		limits:        limits,
 		alwaysApprove: alwaysApprove,
@@ -311,6 +320,45 @@ func (s *Session) ProposeRollback(revision int) (Proposal, *Rejection) {
 		return Proposal{}, rejection
 	}
 	return s.record(fmt.Sprintf("roll back to revision %d", revision), nil, evaluation), nil
+}
+
+func (s *Session) ProposeReset() (Proposal, *Rejection) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if quota := s.quotaExceeded(); quota != nil {
+		return Proposal{}, quota
+	}
+
+	if s.sealed == nil {
+		return Proposal{}, &Rejection{
+			Kind:    RejectNoBaseline,
+			Message: "this device has no sealed baseline to reset to",
+		}
+	}
+
+	problems := s.sealed.Verify(s.baselineKey, s.ports.Clock.Now())
+	if len(problems) > 0 {
+		messages := make([]string, 0, len(problems))
+		for _, problem := range problems {
+			messages = append(messages, problem.String())
+		}
+		return Proposal{}, &Rejection{
+			Kind:    RejectBadBaseline,
+			Message: "the sealed baseline cannot be trusted: " + joinMessages(messages),
+		}
+	}
+
+	target, err := s.sealed.Config()
+	if err != nil {
+		return Proposal{}, &Rejection{Kind: RejectBadBaseline, Message: err.Error()}
+	}
+
+	evaluation, rejection := EvaluateConfig(s.current, target, nil)
+	if rejection != nil {
+		return Proposal{}, rejection
+	}
+	evaluation.RequiresApproval = true
+	return s.record("reset to the sealed baseline", nil, evaluation), nil
 }
 
 func (s *Session) Approve(id, actor string) (Proposal, *ApplyRejection) {

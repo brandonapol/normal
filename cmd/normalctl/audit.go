@@ -7,8 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/brandonapol/normal/pkg/audit"
+	"github.com/brandonapol/normal/pkg/baseline"
+	"github.com/brandonapol/normal/pkg/config"
 	"github.com/brandonapol/normal/pkg/engine"
 )
 
@@ -125,6 +128,26 @@ func verifyCommand(args []string) error {
 	}
 
 	report := store.VerifyLogWith(ctx, audit.Options{PublicKey: publicKey})
+
+	sealed, found, sealErr := baseline.Read(ctx, readOnlyFS{}, dir)
+	switch {
+	case sealErr != nil:
+		fmt.Printf("sealed baseline: unreadable (%v)\n", sealErr)
+	case !found:
+		fmt.Println("sealed baseline: absent")
+	default:
+		problems := sealed.Verify(publicKey, time.Now().UTC())
+		if len(problems) == 0 {
+			fmt.Println("sealed baseline: intact")
+		} else {
+			fmt.Printf("sealed baseline: %d problem(s)\n", len(problems))
+			for _, problem := range problems {
+				fmt.Println("  " + problem.String())
+			}
+			return errInvalidConfig
+		}
+	}
+
 	entries, _, _, loadErr := store.Load(ctx)
 	if loadErr == nil {
 		files, found, readErr := renderedOnDisk(dir)
@@ -144,4 +167,23 @@ func verifyCommand(args []string) error {
 		return errInvalidConfig
 	}
 	return nil
+}
+
+func sealCommand(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("seal takes a path to a 32-byte signing seed")
+	}
+	seed, err := os.ReadFile(args[0])
+	if err != nil {
+		return err
+	}
+	signer, err := audit.NewSoftwareSignerFromSeed(seed)
+	if err != nil {
+		return err
+	}
+	sealed, err := baseline.Seal(config.Baseline(), signer)
+	if err != nil {
+		return err
+	}
+	return emit(sealed)
 }

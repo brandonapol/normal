@@ -27,6 +27,7 @@ pkg/config/              Go bindings, JSON pointers, validation (CUE + semantic)
 pkg/engine/              diff -> plan -> apply -> rollback, over injected ports
 pkg/agent/               the agent's entire surface: tool defs, policy, session
 pkg/audit/               tamper-evident, hash-chained record of every transaction
+pkg/baseline/            the signed configuration a device can always fall back to
 cmd/normalctl/           dev CLI: validate, render, diff, plan
 testdata/invariants/     frozen corpus proving the scroll policy cannot be loosened
 examples/                the baseline config, generated from code
