@@ -39,15 +39,22 @@ type Entry struct {
 	Signature     string    `json:"signature,omitempty"`
 }
 
+type FileState struct {
+	Path     string `json:"path"`
+	Contents string `json:"contents"`
+	Existed  bool   `json:"existed"`
+}
+
 type Pending struct {
-	TransactionID string    `json:"transactionId"`
-	Intent        string    `json:"intent"`
-	FromRevision  int       `json:"fromRevision"`
-	ToRevision    int       `json:"toRevision"`
-	ConfigBefore  string    `json:"configBefore"`
-	Files         []string  `json:"files"`
-	Services      []string  `json:"services"`
-	StartedAt     time.Time `json:"startedAt"`
+	TransactionID string      `json:"transactionId"`
+	Intent        string      `json:"intent"`
+	FromRevision  int         `json:"fromRevision"`
+	ToRevision    int         `json:"toRevision"`
+	ConfigBefore  string      `json:"configBefore"`
+	Files         []string    `json:"files"`
+	Services      []string    `json:"services"`
+	StartedAt     time.Time   `json:"startedAt"`
+	Snapshot      []FileState `json:"snapshot,omitempty"`
 }
 
 func ComputeHash(entry Entry) string {

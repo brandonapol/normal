@@ -36,6 +36,12 @@ func newFaultSet(faults []Fault) *faultSet {
 	return &faultSet{faults: copied}
 }
 
+func (f *faultSet) add(fault Fault) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.faults = append(f.faults, fault)
+}
+
 func (f *faultSet) match(kind FaultKind, target string) *IOError {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -235,6 +241,12 @@ type MemoryPorts struct {
 	FS       *MemoryFileSystem
 	Services *MemoryServiceHost
 	Logger   *MemoryLogger
+
+	faults *faultSet
+}
+
+func (p MemoryPorts) AddFault(fault Fault) {
+	p.faults.add(fault)
 }
 
 type MemoryOptions struct {
@@ -254,6 +266,7 @@ func NewMemoryPorts(options MemoryOptions) MemoryPorts {
 		FS:       fs,
 		Services: services,
 		Logger:   logger,
+		faults:   faults,
 	}
 }
 

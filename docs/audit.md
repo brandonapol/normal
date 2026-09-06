@@ -62,8 +62,7 @@ A log truncated mid-line is treated the same way: the entries that parsed are ve
 the partial tail is reported as truncation. Losing the tail of a log is a crash; losing its integrity
 is an attack, and conflating them would make the log useless for either.
 
-Acting on an incomplete log — re-attempting rollback, falling back to the sealed baseline — is
-NRM-125's job. This ticket only makes the state legible.
+Acting on an incomplete log is `normalctl recover`; see [`docs/recovery.md`](recovery.md).
 
 ## Failed transactions are recorded too
 

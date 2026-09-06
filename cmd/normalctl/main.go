@@ -24,6 +24,7 @@ usage:
   normalctl diff <current.json> <desired.json>
   normalctl plan <current.json> <desired.json>
   normalctl verify [dir]                    check the audit chain and config for drift
+  normalctl recover [--apply] [dir]         repair a device left mid-transaction
   normalctl audit verify [dir]              check the audit chain (default /etc/normal)
   normalctl audit log [dir]                 render transaction history
   normalctl baseline                        print the baseline config
@@ -59,6 +60,8 @@ func run(command string, args []string) error {
 		return plan(args)
 	case "verify":
 		return verifyCommand(args)
+	case "recover":
+		return recoverCommand(args)
 	case "audit":
 		return auditCommand(args)
 	case "baseline":

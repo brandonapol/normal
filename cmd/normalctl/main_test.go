@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brandonapol/normal/pkg/agent"
 	"github.com/brandonapol/normal/pkg/audit"
@@ -461,5 +463,132 @@ func TestVerifyRejectsAForeignKey(t *testing.T) {
 	}
 	if !strings.Contains(output, "unexpected-signing-key") {
 		t.Fatalf("expected the key mismatch to be named, got %q", output)
+	}
+}
+
+func interruptedDeviceDir(t *testing.T) string {
+	t.Helper()
+
+	before, err := engine.Render(config.Baseline())
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	changed := config.Baseline()
+	changed.Spec.Launcher.Columns = 5
+	changed.Metadata.Revision = 1
+	after, err := engine.Render(changed)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "generated"), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	write := func(canonical, contents string) {
+		relative := strings.TrimPrefix(canonical, engine.ConfigRoot+"/")
+		if writeErr := os.WriteFile(filepath.Join(dir, filepath.FromSlash(relative)), []byte(contents), 0o600); writeErr != nil {
+			t.Fatalf("write %s: %v", relative, writeErr)
+		}
+	}
+	for path, contents := range before {
+		write(path, contents)
+	}
+	write(engine.FileLauncher, after[engine.FileLauncher])
+
+	pending := audit.Pending{
+		TransactionID: "txn-0001",
+		Intent:        "five columns",
+		ConfigBefore:  engine.Digest(before),
+		Files:         []string{engine.FileLauncher},
+		Services:      []string{engine.ServiceLauncher},
+		StartedAt:     time.Now().UTC(),
+		Snapshot: []audit.FileState{
+			{Path: engine.FileLauncher, Contents: before[engine.FileLauncher], Existed: true},
+		},
+	}
+	raw, marshalErr := json.Marshal(pending)
+	if marshalErr != nil {
+		t.Fatalf("marshal pending: %v", marshalErr)
+	}
+	if writeErr := os.WriteFile(filepath.Join(dir, "audit.pending"), raw, 0o600); writeErr != nil {
+		t.Fatalf("write pending: %v", writeErr)
+	}
+	return dir
+}
+
+func TestRecoverDryRunReportsWithoutChanging(t *testing.T) {
+	dir := interruptedDeviceDir(t)
+	launcher := filepath.Join(dir, "launcher.json")
+
+	before, err := os.ReadFile(launcher)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	output, err := capture(t, "recover", dir)
+	if err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if !strings.Contains(output, "was interrupted") {
+		t.Fatalf("the report should describe the interruption, got %q", output)
+	}
+	if !strings.Contains(output, "dry run") {
+		t.Fatal("a dry run should say so")
+	}
+
+	after, readErr := os.ReadFile(launcher)
+	if readErr != nil {
+		t.Fatalf("read: %v", readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("a dry run must not touch the device")
+	}
+}
+
+func TestRecoverApplyRestoresTheDevice(t *testing.T) {
+	dir := interruptedDeviceDir(t)
+	launcher := filepath.Join(dir, "launcher.json")
+
+	partial, err := os.ReadFile(launcher)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(partial), `"columns": 5`) {
+		t.Fatal("test setup did not leave a partially applied file")
+	}
+
+	if _, err := capture(t, "recover", "--apply", dir); err != nil {
+		t.Fatalf("recover --apply: %v", err)
+	}
+
+	restored, readErr := os.ReadFile(launcher)
+	if readErr != nil {
+		t.Fatalf("read: %v", readErr)
+	}
+	if !strings.Contains(string(restored), `"columns": 1`) {
+		t.Fatalf("the launcher should be back at its pre-transaction state, got %q", string(restored))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "audit.pending")); !os.IsNotExist(err) {
+		t.Fatal("a completed recovery should clear the pending marker")
+	}
+
+	output, secondErr := capture(t, "recover", dir)
+	if secondErr != nil {
+		t.Fatalf("second recover: %v", secondErr)
+	}
+	if !strings.Contains(output, "nothing to recover") {
+		t.Fatalf("a recovered device has nothing left to do, got %q", output)
+	}
+}
+
+func TestRecoverOnACleanDeviceDoesNothing(t *testing.T) {
+	dir, _ := signedDeviceDir(t)
+	output, err := capture(t, "recover", dir)
+	if err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if !strings.Contains(output, "nothing to recover") {
+		t.Fatalf("unexpected output %q", output)
 	}
 }

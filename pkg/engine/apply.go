@@ -186,7 +186,7 @@ func ApplyPlan(ctx context.Context, plan Plan, ports Ports) (Report, error) {
 	}
 
 	touched := filePaths(plan)
-	beginAudit(ctx, plan, ports, transactionID, startedAt, touched)
+	beginAudit(ctx, plan, ports, transactionID, startedAt, touched, snapshots)
 
 	steps := make([]StepRecord, 0, len(plan.Actions))
 	rollback := func(failed *Action, cause *IOError) error {
@@ -244,9 +244,17 @@ func ApplyPlan(ctx context.Context, plan Plan, ports Ports) (Report, error) {
 	}, nil
 }
 
-func beginAudit(ctx context.Context, plan Plan, ports Ports, transactionID string, startedAt time.Time, touched []string) {
+func beginAudit(ctx context.Context, plan Plan, ports Ports, transactionID string, startedAt time.Time, touched []string, snapshots []fileSnapshot) {
 	if ports.Audit == nil {
 		return
+	}
+	captured := make([]audit.FileState, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		captured = append(captured, audit.FileState{
+			Path:     snapshot.path,
+			Contents: snapshot.contents,
+			Existed:  snapshot.existed,
+		})
 	}
 	pending := audit.Pending{
 		TransactionID: transactionID,
@@ -257,6 +265,7 @@ func beginAudit(ctx context.Context, plan Plan, ports Ports, transactionID strin
 		Files:         touched,
 		Services:      plan.Services,
 		StartedAt:     startedAt,
+		Snapshot:      captured,
 	}
 	if err := ports.Audit.Begin(ctx, pending); err != nil {
 		ports.log(transactionID, "audit-begin-failed", err.Error())
