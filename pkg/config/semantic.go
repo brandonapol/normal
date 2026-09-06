@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -35,8 +36,13 @@ func installedPackages(c Config) map[string]bool {
 	return installed
 }
 
+func pagePath(index int) string {
+	return "/spec/launcher/pages/" + strconv.Itoa(index)
+}
+
 func semanticIssues(c Config, now time.Time, limits Limits) []Issue {
 	l := &issueList{}
+	checkSecrets(l, c)
 	checkLauncher(l, c, limits)
 	checkApps(l, c)
 	checkNotifications(l, c)

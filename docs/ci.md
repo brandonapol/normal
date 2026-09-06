@@ -185,7 +185,9 @@ freezes current behaviour, and upgrading is a separate change with its own testi
 propose the upgrades.
 
 **CodeQL and `dependency-review-action`.** Neither is wired up: both need Advanced Security on a
-private repo and would fail for permissions reasons rather than code reasons. `gosec` runs inside
+private repo and would fail for permissions reasons rather than code reasons. (Secret scanning with
+push protection, the third part of NRM-107, turns out to be enabled already — it rejected a push
+carrying realistic-looking test tokens.) `gosec` runs inside
 golangci-lint and covers the common Go footguns, `govulncheck` covers advisories with reachability
 analysis, and `make licences` covers the licence half of dependency review. Add both when the repo
 goes public.

@@ -100,6 +100,11 @@
       "file": "reject/document-too-deep.json",
       "code": "document-too-deep",
       "why": "nesting is bounded before the schema evaluator sees the document"
+    },
+    {
+      "file": "reject/plaintext-secret.json",
+      "code": "plaintext-secret",
+      "why": "config is rendered into files services read, so it must never carry credentials"
     }
   ],
   "accept": [

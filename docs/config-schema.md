@@ -161,6 +161,13 @@ bound the work. If evaluation ever did exceed the timeout the caller returns cle
 evaluating goroutine is not interruptible and would leak — an acceptable, documented trade for a
 process that applies a handful of changes a day, and a reason to keep the input caps meaningful.
 
+## Secrets
+
+A config carries no credentials, and validation rejects anything that looks like one in a free-text
+field (`plaintext-secret`). Config is rendered into files that services read and users share, so a
+credential in that pipeline leaks by design. See [`docs/security/secrets.md`](security/secrets.md)
+for the policy and for the design a secret-bearing field would have to follow.
+
 ## Extending it
 
 Add a field: extend `normal.cue` and the matching Go struct, then add it to the ownership table in
